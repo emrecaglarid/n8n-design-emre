@@ -1,46 +1,59 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { N8nIcon } from '@n8n/design-system';
 import NodeIcon from '@/app/components/NodeIcon.vue';
 import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import {
 	useSimulatedOutputPreviewStore,
 	type SimulatedPreview,
+	type PreviewVerdict,
 } from '../simulatedOutputPreview.store';
 import { useSimulatedOutputPreviews } from '../composables/useSimulatedOutputPreviews';
 import OutputPreviewCard from './OutputPreviewCard.vue';
+
+const emit = defineEmits<{
+	stop: [];
+}>();
 
 useSimulatedOutputPreviews();
 
 const store = useSimulatedOutputPreviewStore();
 const nodeTypesStore = useNodeTypesStore();
 
-const chips = computed(() => store.previews);
+const pillLabel = computed(() =>
+	store.pillPhase === 'generating' ? 'Generating output previews…' : 'Running nodes…',
+);
 
-function chipLabel(preview: SimulatedPreview): string {
-	if (preview.kind === 'slack') return `#${(preview.channel ?? 'channel').replace(/^#/, '')}`;
-	return preview.to ?? 'Email';
+const outputsSubtitle = computed(() => {
+	const count = store.runOutputsTotal;
+	return `Workflow generated ${count} output${count === 1 ? '' : 's'}`;
+});
+
+function behindTitle(preview: SimulatedPreview): string {
+	if (preview.kind === 'slack') return 'Slack message';
+	return 'Email';
 }
 
-function onChipClick(preview: SimulatedPreview) {
-	if (store.openPreviewId === preview.id) {
-		store.closeOpen();
-	} else {
-		store.open(preview.id);
+async function onVerdict(preview: SimulatedPreview, verdict: PreviewVerdict) {
+	await flyToNode(preview);
+	store.dismissPreview(preview.id, verdict);
+}
+
+async function onClose(preview: SimulatedPreview) {
+	await flyToNode(preview);
+	store.dismissPreview(preview.id);
+}
+
+async function onDismissPill() {
+	for (const preview of [...store.previews]) {
+		await flyToNode(preview);
 	}
-}
-
-async function onDismiss() {
-	const preview = store.openPreview;
-	if (!preview) return;
-	await flyToNode(preview.nodeName);
-	store.dismissOpen();
+	store.dismissPill();
 }
 
 /** Clone the card and animate it into the destination node on the canvas */
-async function flyToNode(nodeName: string): Promise<void> {
-	const cardEl = document.querySelector('[data-simulated-preview-card]');
-	const nodeEl = document.querySelector(`[data-node-name="${CSS.escape(nodeName)}"]`);
+async function flyToNode(preview: SimulatedPreview): Promise<void> {
+	const cardEl = document.querySelector(`[data-simulated-preview-card="${preview.id}"]`);
+	const nodeEl = document.querySelector(`[data-node-name="${CSS.escape(preview.nodeName)}"]`);
 	if (!(cardEl instanceof HTMLElement) || !(nodeEl instanceof HTMLElement)) return;
 
 	const from = cardEl.getBoundingClientRect();
@@ -78,40 +91,132 @@ async function flyToNode(nodeName: string): Promise<void> {
 </script>
 
 <template>
-	<div v-if="store.hasPreviews" :class="$style.overlay" data-test-id="simulated-output-overlay">
-		<OutputPreviewCard
-			v-if="store.openPreview"
-			:key="store.openPreview.id"
-			:preview="store.openPreview"
-			@dismiss="onDismiss"
-			@close="store.closeOpen()"
-		/>
-		<div :class="$style.strip">
-			<N8nIcon icon="eye" size="small" :class="$style.stripIcon" />
-			<span :class="$style.stripLabel">Outputs</span>
-			<button
-				v-for="preview in chips"
-				:key="preview.id"
-				:class="[$style.chip, { [$style.chipActive]: preview.id === store.openPreviewId }]"
-				:data-test-id="`simulated-output-chip`"
-				@click="onChipClick(preview)"
-			>
-				<NodeIcon :node-type="nodeTypesStore.getNodeType(preview.nodeType)" :size="12" />
-				<span :class="$style.chipLabel">{{ chipLabel(preview) }}</span>
-				<N8nIcon
-					v-if="preview.nodeErrored"
-					icon="triangle-alert"
-					size="xsmall"
-					:class="$style.chipWarning"
+	<div
+		v-if="store.isPillActive || store.hasPreviews"
+		:class="$style.overlay"
+		data-test-id="simulated-output-overlay"
+	>
+		<!-- Deck of output previews -->
+		<div v-if="store.hasPreviews" :class="$style.deck">
+			<template v-if="!store.showAll">
+				<button
+					v-for="preview in store.behindPreviews"
+					:key="preview.id"
+					:class="$style.behindBar"
+					data-test-id="simulated-output-behind-bar"
+					@click="store.bringToFront(preview.id)"
+				>
+					<NodeIcon :node-type="nodeTypesStore.getNodeType(preview.nodeType)" :size="14" />
+					<span :class="$style.behindTitle">{{ behindTitle(preview) }}</span>
+					<span :class="$style.behindPreviewOnly">Preview only</span>
+				</button>
+				<OutputPreviewCard
+					v-if="store.frontPreview"
+					:key="store.frontPreview.id"
+					:preview="store.frontPreview"
+					@verdict="onVerdict(store.frontPreview, $event)"
+					@close="onClose(store.frontPreview)"
 				/>
-			</button>
+			</template>
+			<template v-else>
+				<OutputPreviewCard
+					v-for="preview in store.previews"
+					:key="preview.id"
+					:preview="preview"
+					@verdict="onVerdict(preview, $event)"
+					@close="onClose(preview)"
+				/>
+			</template>
+		</div>
+
+		<!-- Phased execution pill -->
+		<div v-if="store.isPillActive" :class="$style.pill" data-test-id="simulated-execution-pill">
+			<template v-if="store.pillPhase === 'running' || store.pillPhase === 'generating'">
+				<span :class="$style.spinnerBox">
+					<svg
+						:class="$style.spinner"
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="#fff"
+						stroke-width="2.6"
+						stroke-linecap="round"
+					>
+						<path d="M12 2a10 10 0 1 1-7.07 2.93" />
+					</svg>
+				</span>
+				<span :class="$style.pillLabel">{{ pillLabel }}</span>
+				<button
+					:class="$style.pillIconButton"
+					title="Stop execution"
+					data-test-id="simulated-pill-stop"
+					@click="emit('stop')"
+				>
+					<svg
+						width="13"
+						height="13"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.2"
+						stroke-linejoin="round"
+					>
+						<rect x="4" y="4" width="16" height="16" rx="2" />
+					</svg>
+				</button>
+			</template>
+			<template v-else>
+				<svg
+					:class="$style.check"
+					width="24"
+					height="24"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<path d="M20 6 9 17l-5-5" />
+				</svg>
+				<span :class="$style.pillMessage">
+					<span :class="$style.pillTitle">Run successful</span>
+					<span :class="$style.pillSubtitle">{{ outputsSubtitle }}</span>
+				</span>
+				<button
+					v-if="store.previews.length > 1"
+					:class="$style.showAllButton"
+					data-test-id="simulated-pill-show-all"
+					@click="store.toggleShowAll()"
+				>
+					{{ store.showAll ? 'Collapse' : 'Show all' }}
+				</button>
+				<button
+					:class="$style.pillIconButton"
+					title="Dismiss"
+					data-test-id="simulated-pill-dismiss"
+					@click="onDismissPill"
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 16 16"
+						fill="none"
+						stroke="currentColor"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<circle cx="8" cy="8" r="6.667" />
+						<path d="M10 6l-4 4" />
+						<path d="M6 6l4 4" />
+					</svg>
+				</button>
+			</template>
 		</div>
 	</div>
 </template>
 
 <style lang="scss" module>
-@use '@n8n/design-system/css/common/var';
-
 .overlay {
 	display: flex;
 	flex-direction: column;
@@ -124,57 +229,160 @@ async function flyToNode(nodeName: string): Promise<void> {
 	}
 }
 
-.strip {
+.deck {
 	display: flex;
+	flex-direction: column;
 	align-items: center;
-	gap: var(--spacing--3xs);
-	background: var(--color--background--light-2, var(--color--background));
-	border: var(--border);
-	border-radius: var(--radius--xl, 20px);
-	padding: var(--spacing--4xs) var(--spacing--2xs);
-	box-shadow: var(--shadow--light, 0 2px 8px rgba(0, 0, 0, 0.08));
-}
+	gap: var(--spacing--2xs);
+	pointer-events: none;
 
-.stripIcon {
-	color: var(--color--text--tint-1);
-}
-
-.stripLabel {
-	font-size: var(--font-size--3xs);
-	color: var(--color--text--tint-1);
-	margin-right: var(--spacing--4xs);
-}
-
-.chip {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--spacing--4xs);
-	border: var(--border);
-	background: var(--color--background--light-3, var(--color--background));
-	border-radius: var(--radius--xl, 20px);
-	padding: var(--spacing--5xs, 2px) var(--spacing--2xs);
-	cursor: pointer;
-	font-size: var(--font-size--3xs);
-	color: var(--color--text);
-
-	&:hover {
-		border-color: var(--color--primary);
+	> * {
+		pointer-events: auto;
 	}
 }
 
-.chipActive {
-	border-color: var(--color--primary);
-	background: var(--color--primary--tint-3, var(--color--background));
+/* Peeking header of a card behind the front one */
+.behindBar {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--2xs);
+	width: 528px;
+	max-width: 86vw;
+	margin-bottom: calc(-1 * var(--spacing--2xs) - 4px);
+	padding: var(--spacing--2xs) var(--spacing--xs) calc(var(--spacing--2xs) + 8px);
+	background: var(--color--background--light-2, var(--color--background));
+	border: var(--border);
+	border-radius: var(--radius--lg) var(--radius--lg) 0 0;
+	box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+	cursor: pointer;
+	opacity: 0.85;
+
+	&:hover {
+		opacity: 1;
+	}
 }
 
-.chipLabel {
-	max-width: 140px;
+.behindTitle {
+	flex-grow: 1;
+	text-align: left;
+	font-size: var(--font-size--2xs);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text--tint-1);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.chipWarning {
+.behindPreviewOnly {
+	flex: 0 0 auto;
+	font-size: var(--font-size--3xs);
 	color: var(--color--warning);
+	opacity: 0.7;
+}
+
+.pill {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--2xs);
+	min-width: 420px;
+	max-width: 86vw;
+	min-height: 52px;
+	padding: var(--spacing--2xs);
+	background: var(--color--background--light-2, var(--color--background));
+	border: var(--border);
+	border-radius: var(--radius--lg);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.spinnerBox {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	flex-shrink: 0;
+	background: var(--color--primary);
+	border-radius: var(--radius);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.spinner {
+	animation: simulated-spin 900ms linear infinite;
+}
+
+@keyframes simulated-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.pillLabel {
+	flex-grow: 1;
+	font-size: var(--font-size--sm);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text);
+}
+
+.check {
+	flex-shrink: 0;
+	stroke: var(--color--success, #29a568);
+	margin-left: var(--spacing--3xs);
+}
+
+.pillMessage {
+	display: flex;
+	flex-direction: column;
+	flex-grow: 1;
+	gap: 1px;
+}
+
+.pillTitle {
+	font-size: var(--font-size--sm);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text);
+	line-height: var(--line-height--sm);
+}
+
+.pillSubtitle {
+	font-size: var(--font-size--sm);
+	color: var(--color--text);
+	line-height: var(--line-height--sm);
+}
+
+.showAllButton {
+	display: flex;
+	align-items: center;
+	height: 36px;
+	padding: 0 16px;
+	flex-shrink: 0;
+	background: var(--color--background--light-3, var(--color--background));
+	border: 1px solid var(--color--foreground);
+	border-radius: var(--radius);
+	font-size: var(--font-size--sm);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text);
+	cursor: pointer;
+
+	&:hover {
+		border-color: var(--color--text--tint-1);
+	}
+}
+
+.pillIconButton {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	flex-shrink: 0;
+	background: var(--color--background--light-3, var(--color--background));
+	border: 1px solid var(--color--foreground);
+	border-radius: var(--radius);
+	color: var(--color--text);
+	cursor: pointer;
+
+	&:hover {
+		border-color: var(--color--text--tint-1);
+	}
 }
 </style>

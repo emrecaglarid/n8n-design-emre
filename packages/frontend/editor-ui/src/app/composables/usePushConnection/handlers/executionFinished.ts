@@ -49,6 +49,7 @@ import {
 	createRunExecutionData,
 } from 'n8n-workflow';
 import { useDocumentTitle } from '@/app/composables/useDocumentTitle';
+import { useSimulatedOutputPreviewStore } from '@/experiments/simulatedOutputPreview/simulatedOutputPreview.store';
 import type { PushHandlerOptions } from './types';
 
 export type SimplifiedExecution = Pick<
@@ -440,7 +441,10 @@ function handleExecutionFinishedSuccessfully(
 
 	useDocumentTitle().setDocumentTitle(workflowName, 'IDLE');
 	useWorkflowExecutionStateStore(documentId).setActiveExecutionId(undefined);
-	if (!suppressToasts) {
+	// AI Trust prototype: the execution pill is the single success confirmation
+	// while it is active, so the toast stays quiet for those runs.
+	const simulatedPillActive = useSimulatedOutputPreviewStore().isPillActive;
+	if (!suppressToasts && !simulatedPillActive) {
 		toast.showMessage({
 			title: message,
 			type: 'success',

@@ -134,6 +134,7 @@ import { useEvaluationsWizardSidepanelStore } from '@/features/ai/evaluation.ee/
 import { useEvaluationsWizardSidepanelExperiment } from '@/experiments/evaluationsWizardSidepanel/useEvaluationsWizardSidepanelExperiment';
 import EvaluationsCanvasInfoCard from '@/features/ai/evaluation.ee/components/EvaluationsCanvasInfoCard/EvaluationsCanvasInfoCard.vue';
 import SimulatedOutputOverlay from '@/experiments/simulatedOutputPreview/components/SimulatedOutputOverlay.vue';
+import { useSimulatedOutputPreviewStore } from '@/experiments/simulatedOutputPreview/simulatedOutputPreview.store';
 import { useChatHubPanelStore } from '@/features/ai/chatHub/chatHubPanel.store';
 import { useKeybindings } from '@/app/composables/useKeybindings';
 import { type ContextMenuAction } from '@/features/shared/contextMenu/composables/useContextMenuItems';
@@ -1985,6 +1986,8 @@ onBeforeUnmount(() => {
 	removeUndoRedoEventBindings();
 	canvasEventBus.off('saved:workflow', onSaveFromWithinExecutionDebug);
 });
+
+const simulatedOutputPreviewStore = useSimulatedOutputPreviewStore();
 </script>
 
 <template>
@@ -2061,7 +2064,7 @@ onBeforeUnmount(() => {
 			/>
 			<div v-if="!isCanvasReadOnly || canExecuteOnCanvas" :class="$style.executionButtons">
 				<CanvasRunWorkflowButton
-					v-if="isRunWorkflowButtonVisible"
+					v-if="isRunWorkflowButtonVisible && !simulatedOutputPreviewStore.isPillActive"
 					:waiting-for-webhook="isExecutionWaitingForWebhook"
 					:disabled="isExecutionDisabled"
 					:executing="isWorkflowRunning"
@@ -2096,7 +2099,7 @@ onBeforeUnmount(() => {
 					</KeyboardShortcutTooltip>
 				</template>
 				<CanvasStopCurrentExecutionButton
-					v-if="isStopExecutionButtonVisible"
+					v-if="isStopExecutionButtonVisible && !simulatedOutputPreviewStore.isPillActive"
 					:stopping="isStoppingExecution"
 					:size="isRunButtonSplit ? 'xlarge' : 'large'"
 					@click="onStopExecution"
@@ -2111,6 +2114,7 @@ onBeforeUnmount(() => {
 			<SimulatedOutputOverlay
 				v-if="!isCanvasReadOnly"
 				:class="$style.simulatedOutputOverlayWrapper"
+				@stop="onStopExecution"
 			/>
 
 			<N8nCallout

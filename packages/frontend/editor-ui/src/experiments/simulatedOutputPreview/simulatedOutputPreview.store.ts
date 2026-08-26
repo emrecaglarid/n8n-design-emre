@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 export type SimulatedPreviewKind = 'slack' | 'email';
+export type PreviewVerdict = 'up' | 'down';
+export type PillPhase = 'idle' | 'running' | 'generating' | 'success';
 
 export interface SimulatedPreview {
 	id: string;
@@ -20,24 +22,37 @@ export interface SimulatedPreview {
 	nodeExecuted: boolean;
 	nodeErrored: boolean;
 	executedAt: number;
+	/** Set when the user judged the preview (r1: thumbs pair). Undefined = unreviewed. */
+	verdict?: PreviewVerdict;
 }
 
 /**
- * AI Trust prototype (idea/ai-trust-q3-design-directions): holds the simulated
- * destination-output previews for the current run (shown in the canvas strip)
- * and the per-node stacks previews fly into when dismissed.
+ * AI Trust prototype (idea/ai-trust-q3-design-directions), r1 revision:
+ * a phased execution pill replaces the run/stop buttons during a manual run
+ * (running → generating output previews → run successful), and destination
+ * previews render as a stacked deck above it. Judged or dismissed previews
+ * fly into a stack behind their destination node.
  */
 export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPreview', () => {
-	/** Previews from the latest manual run, in rank order (most consequential first) */
+	/** Previews of the latest manual run, in rank order (most consequential first) */
 	const previews = ref<SimulatedPreview[]>([]);
-	const openPreviewId = ref<string | null>(null);
-	/** Dismissed previews, stacked behind their destination node */
+	const frontPreviewId = ref<string | null>(null);
+	/** Judged/dismissed previews, stacked behind their destination node */
 	const stacks = ref<Record<string, SimulatedPreview[]>>({});
+	const pillPhase = ref<PillPhase>('idle');
+	/** "Show all" control: spread the deck into a vertical list */
+	const showAll = ref(false);
+	/** How many outputs the run generated — the pill reports this, not what's left */
+	const runOutputsTotal = ref(0);
 
-	const openPreview = computed(
-		() => previews.value.find((p) => p.id === openPreviewId.value) ?? null,
+	const frontPreview = computed(
+		() => previews.value.find((p) => p.id === frontPreviewId.value) ?? null,
+	);
+	const behindPreviews = computed(() =>
+		previews.value.filter((p) => p.id !== frontPreviewId.value),
 	);
 	const hasPreviews = computed(() => previews.value.length > 0);
+	const isPillActive = computed(() => pillPhase.value !== 'idle');
 
 	function stackCount(nodeName: string): number {
 		return stacks.value[nodeName]?.length ?? 0;
@@ -50,18 +65,60 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		};
 	}
 
-	/** A new run finished: anything left from the previous run flies to its stack */
+	/** A manual run started (only called when the workflow has destination nodes) */
+	function startRun() {
+		pillPhase.value = 'running';
+		showAll.value = false;
+	}
+
+	/** Run finished; previews are being resolved and rendered */
+	function setGenerating() {
+		pillPhase.value = 'generating';
+	}
+
+	/** No pill for this run after all (no previews, run errored, …) */
+	function cancelPill() {
+		pillPhase.value = 'idle';
+	}
+
+	/** Previews are ready: leftovers from the previous run fly to their stacks */
 	function setRunPreviews(next: SimulatedPreview[]) {
 		for (const preview of previews.value) pushToStack(preview);
 		previews.value = next;
-		openPreviewId.value = next[0]?.id ?? null;
+		frontPreviewId.value = next[0]?.id ?? null;
+		runOutputsTotal.value = next.length;
+		pillPhase.value = 'success';
 	}
 
-	function open(id: string) {
-		openPreviewId.value = id;
+	function bringToFront(id: string) {
+		if (previews.value.some((p) => p.id === id)) frontPreviewId.value = id;
 	}
 
-	/** Node badge clicked: pull the latest preview back out of the stack and open it */
+	/** Judge or close one preview: it leaves the deck and lands in the node's stack */
+	function dismissPreview(id: string, verdict?: PreviewVerdict) {
+		const preview = previews.value.find((p) => p.id === id);
+		if (!preview) return;
+		pushToStack({ ...preview, verdict });
+		previews.value = previews.value.filter((p) => p.id !== id);
+		if (frontPreviewId.value === id) {
+			frontPreviewId.value = previews.value[0]?.id ?? null;
+		}
+	}
+
+	/** ⊗ on the pill: everything unreviewed flies to its stack, pill goes away */
+	function dismissPill() {
+		for (const preview of previews.value) pushToStack(preview);
+		previews.value = [];
+		frontPreviewId.value = null;
+		pillPhase.value = 'idle';
+		showAll.value = false;
+	}
+
+	function toggleShowAll() {
+		showAll.value = !showAll.value;
+	}
+
+	/** Node badge clicked: pull the latest preview back out of the stack */
 	function openFromStack(nodeName: string) {
 		const stack = stacks.value[nodeName] ?? [];
 		const latest = stack[stack.length - 1];
@@ -70,41 +127,38 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		if (!previews.value.some((p) => p.id === latest.id)) {
 			previews.value = [...previews.value, latest];
 		}
-		openPreviewId.value = latest.id;
-	}
-
-	/** Dismiss = reviewed: the preview leaves the strip and lands in the node's stack */
-	function dismissOpen() {
-		const preview = openPreview.value;
-		if (!preview) return;
-		pushToStack(preview);
-		previews.value = previews.value.filter((p) => p.id !== preview.id);
-		openPreviewId.value = null;
-	}
-
-	/** Close without stacking (chip stays in the strip) */
-	function closeOpen() {
-		openPreviewId.value = null;
+		frontPreviewId.value = latest.id;
 	}
 
 	function clearAll() {
 		previews.value = [];
-		openPreviewId.value = null;
+		frontPreviewId.value = null;
 		stacks.value = {};
+		pillPhase.value = 'idle';
+		showAll.value = false;
 	}
 
 	return {
 		previews,
-		openPreview,
-		openPreviewId,
+		frontPreview,
+		frontPreviewId,
+		behindPreviews,
 		hasPreviews,
 		stacks,
+		pillPhase,
+		isPillActive,
+		showAll,
+		runOutputsTotal,
 		stackCount,
+		startRun,
+		setGenerating,
+		cancelPill,
 		setRunPreviews,
-		open,
+		bringToFront,
+		dismissPreview,
+		dismissPill,
+		toggleShowAll,
 		openFromStack,
-		dismissOpen,
-		closeOpen,
 		clearAll,
 	};
 });

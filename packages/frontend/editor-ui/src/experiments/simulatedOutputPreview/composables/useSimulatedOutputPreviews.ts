@@ -35,27 +35,49 @@ export function useSimulatedOutputPreviews() {
 	watch(
 		() => workflowExecutionStateStore.value?.isWorkflowRunning,
 		(running, wasRunning) => {
-			if (wasRunning && !running) void buildPreviews();
+			if (running && !wasRunning) {
+				const doc = workflowDocumentStore.value;
+				const hasDestinations = doc?.allNodes.some((node) => DESTINATION_NODE_KINDS[node.type]);
+				if (hasDestinations) previewStore.startRun();
+				return;
+			}
+			if (wasRunning && !running && previewStore.pillPhase === 'running') {
+				void buildPreviews();
+			}
 		},
 	);
 
 	async function buildPreviews() {
 		const doc = workflowDocumentStore.value;
 		const exec = workflowExecutionStateStore.value;
-		if (!doc || !exec) return;
+		if (!doc || !exec) {
+			previewStore.cancelPill();
+			return;
+		}
 
 		const mode = exec.activeExecution?.mode;
-		if (mode !== undefined && mode !== 'manual') return;
+		const status = exec.activeExecution?.status;
+		if ((mode !== undefined && mode !== 'manual') || status === 'error' || status === 'crashed') {
+			previewStore.cancelPill();
+			return;
+		}
+
+		previewStore.setGenerating();
 
 		const destinationNodes = doc.allNodes.filter((node) => DESTINATION_NODE_KINDS[node.type]);
-		if (destinationNodes.length === 0) return;
-
 		const previews: SimulatedPreview[] = [];
 		for (const node of destinationNodes) {
 			const preview = await buildPreviewForNode(node);
 			if (preview) previews.push(preview);
 		}
-		if (previews.length > 0) previewStore.setRunPreviews(previews);
+		if (previews.length > 0) {
+			// Prototype pacing: resolving previews is near-instant today, but the phase
+			// stands in for real verdict work later — hold it long enough to be legible.
+			await new Promise((resolve) => setTimeout(resolve, 700));
+			previewStore.setRunPreviews(previews);
+		} else {
+			previewStore.cancelPill();
+		}
 	}
 
 	async function buildPreviewForNode(node: INodeUi): Promise<SimulatedPreview | null> {
