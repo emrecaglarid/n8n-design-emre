@@ -28,6 +28,8 @@ const outputsSubtitle = computed(() => {
 	return `Workflow generated ${count} output${count === 1 ? '' : 's'}`;
 });
 
+const pillContentKey = computed(() => (store.pillPhase === 'success' ? 'success' : 'progress'));
+
 function behindTitle(preview: SimulatedPreview): string {
 	if (preview.kind === 'slack') return 'Slack message';
 	return 'Email';
@@ -44,9 +46,19 @@ async function onClose(preview: SimulatedPreview) {
 }
 
 async function onDismissPill() {
-	for (const preview of [...store.previews]) {
-		await flyToNode(preview);
-	}
+	// Fly all remaining cards concurrently with a short stagger instead of one
+	// after another — the wait would otherwise grow with every extra output.
+	const targets = [...store.previews];
+	await Promise.all(
+		targets.map(
+			async (preview, index) =>
+				await new Promise<void>((resolve) => {
+					setTimeout(() => {
+						void flyToNode(preview).then(resolve);
+					}, index * 100);
+				}),
+		),
+	);
 	store.dismissPill();
 }
 
@@ -97,122 +109,146 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 		data-test-id="simulated-output-overlay"
 	>
 		<!-- Deck of output previews -->
-		<div v-if="store.hasPreviews" :class="$style.deck">
-			<template v-if="!store.showAll">
-				<button
-					v-for="preview in store.behindPreviews"
-					:key="preview.id"
-					:class="$style.behindBar"
-					data-test-id="simulated-output-behind-bar"
-					@click="store.bringToFront(preview.id)"
-				>
-					<NodeIcon :node-type="nodeTypesStore.getNodeType(preview.nodeType)" :size="14" />
-					<span :class="$style.behindTitle">{{ behindTitle(preview) }}</span>
-					<span :class="$style.behindPreviewOnly">Preview only</span>
-				</button>
-				<OutputPreviewCard
-					v-if="store.frontPreview"
-					:key="store.frontPreview.id"
-					:preview="store.frontPreview"
-					@verdict="onVerdict(store.frontPreview, $event)"
-					@close="onClose(store.frontPreview)"
-				/>
-			</template>
-			<template v-else>
-				<OutputPreviewCard
-					v-for="preview in store.previews"
-					:key="preview.id"
-					:preview="preview"
-					@verdict="onVerdict(preview, $event)"
-					@close="onClose(preview)"
-				/>
-			</template>
-		</div>
+		<Transition
+			:enter-active-class="$style.riseEnterActive"
+			:enter-from-class="$style.riseEnterFrom"
+			:leave-active-class="$style.riseLeaveActive"
+			:leave-to-class="$style.riseLeaveTo"
+		>
+			<div v-if="store.hasPreviews" :class="[$style.deck, $style.staggered]">
+				<template v-if="!store.showAll">
+					<button
+						v-for="preview in store.behindPreviews"
+						:key="preview.id"
+						:class="[$style.behindBar, $style.pressable]"
+						data-test-id="simulated-output-behind-bar"
+						@click="store.bringToFront(preview.id)"
+					>
+						<NodeIcon :node-type="nodeTypesStore.getNodeType(preview.nodeType)" :size="14" />
+						<span :class="$style.behindTitle">{{ behindTitle(preview) }}</span>
+						<span :class="$style.behindPreviewOnly">Preview only</span>
+					</button>
+					<OutputPreviewCard
+						v-if="store.frontPreview"
+						:key="store.frontPreview.id"
+						:preview="store.frontPreview"
+						@verdict="onVerdict(store.frontPreview, $event)"
+						@close="onClose(store.frontPreview)"
+					/>
+				</template>
+				<template v-else>
+					<OutputPreviewCard
+						v-for="preview in store.previews"
+						:key="preview.id"
+						:preview="preview"
+						@verdict="onVerdict(preview, $event)"
+						@close="onClose(preview)"
+					/>
+				</template>
+			</div>
+		</Transition>
 
 		<!-- Phased execution pill -->
-		<div v-if="store.isPillActive" :class="$style.pill" data-test-id="simulated-execution-pill">
-			<template v-if="store.pillPhase === 'running' || store.pillPhase === 'generating'">
-				<span :class="$style.spinnerBox">
-					<svg
-						:class="$style.spinner"
-						width="16"
-						height="16"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="#fff"
-						stroke-width="2.6"
-						stroke-linecap="round"
-					>
-						<path d="M12 2a10 10 0 1 1-7.07 2.93" />
-					</svg>
-				</span>
-				<span :class="$style.pillLabel">{{ pillLabel }}</span>
-				<button
-					:class="$style.pillIconButton"
-					title="Stop execution"
-					data-test-id="simulated-pill-stop"
-					@click="emit('stop')"
+		<Transition
+			:enter-active-class="$style.riseEnterActive"
+			:enter-from-class="$style.riseEnterFrom"
+			:leave-active-class="$style.riseLeaveActive"
+			:leave-to-class="$style.riseLeaveTo"
+		>
+			<div v-if="store.isPillActive" :class="$style.pill" data-test-id="simulated-execution-pill">
+				<Transition
+					mode="out-in"
+					:enter-active-class="$style.fadeEnterActive"
+					:enter-from-class="$style.fadeEnterFrom"
+					:leave-active-class="$style.fadeLeaveActive"
+					:leave-to-class="$style.fadeLeaveTo"
 				>
-					<svg
-						width="13"
-						height="13"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.2"
-						stroke-linejoin="round"
-					>
-						<rect x="4" y="4" width="16" height="16" rx="2" />
-					</svg>
-				</button>
-			</template>
-			<template v-else>
-				<svg
-					:class="$style.check"
-					width="24"
-					height="24"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<path d="M20 6 9 17l-5-5" />
-				</svg>
-				<span :class="$style.pillMessage">
-					<span :class="$style.pillTitle">Run successful</span>
-					<span :class="$style.pillSubtitle">{{ outputsSubtitle }}</span>
-				</span>
-				<button
-					v-if="store.previews.length > 1"
-					:class="$style.showAllButton"
-					data-test-id="simulated-pill-show-all"
-					@click="store.toggleShowAll()"
-				>
-					{{ store.showAll ? 'Collapse' : 'Show all' }}
-				</button>
-				<button
-					:class="$style.pillIconButton"
-					title="Dismiss"
-					data-test-id="simulated-pill-dismiss"
-					@click="onDismissPill"
-				>
-					<svg
-						width="16"
-						height="16"
-						viewBox="0 0 16 16"
-						fill="none"
-						stroke="currentColor"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<circle cx="8" cy="8" r="6.667" />
-						<path d="M10 6l-4 4" />
-						<path d="M6 6l4 4" />
-					</svg>
-				</button>
-			</template>
-		</div>
+					<div :key="pillContentKey" :class="$style.pillContent">
+						<template v-if="store.pillPhase === 'running' || store.pillPhase === 'generating'">
+							<span :class="$style.spinnerBox">
+								<svg
+									:class="$style.spinner"
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="#fff"
+									stroke-width="2.6"
+									stroke-linecap="round"
+								>
+									<path d="M12 2a10 10 0 1 1-7.07 2.93" />
+								</svg>
+							</span>
+							<span :class="$style.pillLabel">{{ pillLabel }}</span>
+							<button
+								:class="[$style.pillIconButton, $style.pressable]"
+								title="Stop execution"
+								data-test-id="simulated-pill-stop"
+								@click="emit('stop')"
+							>
+								<svg
+									width="13"
+									height="13"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2.2"
+									stroke-linejoin="round"
+								>
+									<rect x="4" y="4" width="16" height="16" rx="2" />
+								</svg>
+							</button>
+						</template>
+						<template v-else>
+							<svg
+								:class="$style.check"
+								width="24"
+								height="24"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M20 6 9 17l-5-5" />
+							</svg>
+							<span :class="$style.pillMessage">
+								<span :class="$style.pillTitle">Run successful</span>
+								<span :class="$style.pillSubtitle">{{ outputsSubtitle }}</span>
+							</span>
+							<button
+								v-if="store.previews.length > 1"
+								:class="[$style.showAllButton, $style.pressable]"
+								data-test-id="simulated-pill-show-all"
+								@click="store.toggleShowAll()"
+							>
+								{{ store.showAll ? 'Collapse' : 'Show all' }}
+							</button>
+							<button
+								:class="[$style.pillIconButton, $style.pressable]"
+								title="Dismiss"
+								data-test-id="simulated-pill-dismiss"
+								@click="onDismissPill"
+							>
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 16 16"
+									fill="none"
+									stroke="currentColor"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<circle cx="8" cy="8" r="6.667" />
+									<path d="M10 6l-4 4" />
+									<path d="M6 6l4 4" />
+								</svg>
+							</button>
+						</template>
+					</div>
+				</Transition>
+			</div>
+		</Transition>
 	</div>
 </template>
 
@@ -353,6 +389,63 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 	font-size: var(--font-size--sm);
 	color: var(--color--text);
 	line-height: var(--line-height--sm);
+	font-variant-numeric: tabular-nums;
+}
+
+.pillContent {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--2xs);
+	flex-grow: 1;
+	min-width: 0;
+}
+
+/* Enter/exit for the pill and the deck: soft rise in, softer settle out */
+.riseEnterActive {
+	transition:
+		opacity 200ms ease-out,
+		translate 200ms ease-out;
+}
+
+.riseEnterFrom {
+	opacity: 0;
+	translate: 0 8px;
+}
+
+.riseLeaveActive {
+	transition:
+		opacity 150ms ease-out,
+		translate 150ms ease-out;
+}
+
+.riseLeaveTo {
+	opacity: 0;
+	translate: 0 4px;
+}
+
+/* The deck enters ~100ms after the pill lands on success — staged, not simultaneous */
+.staggered.riseEnterActive {
+	transition-delay: 100ms;
+}
+
+/* Cross-fade between the pill's progress and success content */
+.fadeEnterActive,
+.fadeLeaveActive {
+	transition: opacity 120ms ease-out;
+}
+
+.fadeEnterFrom,
+.fadeLeaveTo {
+	opacity: 0;
+}
+
+.pressable {
+	transition-property: scale;
+	transition-duration: 100ms;
+
+	&:active {
+		scale: 0.96;
+	}
 }
 
 .showAllButton {

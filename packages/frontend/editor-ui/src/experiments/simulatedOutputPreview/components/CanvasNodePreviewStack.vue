@@ -44,6 +44,20 @@ function onClick(event: MouseEvent) {
 	padding: 0;
 	cursor: pointer;
 	z-index: 1;
+	transition-property: scale;
+	transition-duration: 100ms;
+
+	/* The visible chip is ~20px tall; widen the hit area a little without
+	   eating into the node's own double-click surface */
+	&::after {
+		content: '';
+		position: absolute;
+		inset: -5px;
+	}
+
+	&:active {
+		scale: 0.96;
+	}
 }
 
 .layerBack,
@@ -76,6 +90,7 @@ function onClick(event: MouseEvent) {
 	color: var(--color--text);
 	font-size: var(--font-size--3xs);
 	font-weight: var(--font-weight--bold);
+	font-variant-numeric: tabular-nums;
 	padding: 1px var(--spacing--3xs);
 	box-shadow: var(--shadow--light, 0 1px 4px rgba(0, 0, 0, 0.08));
 }

@@ -146,6 +146,7 @@ const title = computed(() => {
 }
 
 .closeButton {
+	position: relative;
 	flex: 0 0 auto;
 	border: none;
 	background: transparent;
@@ -154,6 +155,13 @@ const title = computed(() => {
 	display: flex;
 	align-items: center;
 	padding: var(--spacing--4xs);
+
+	/* Visible target is ~24px; extend the hit area to ~40px without moving anything */
+	&::before {
+		content: '';
+		position: absolute;
+		inset: -8px;
+	}
 
 	&:hover {
 		color: var(--color--text);
@@ -174,22 +182,38 @@ const title = computed(() => {
 }
 
 .thumbsDownButton {
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	width: 36px;
+	min-height: 30px;
 	background: var(--color--background--light-3, var(--color--background));
 	border: 1px solid var(--color--foreground);
 	border-radius: var(--radius);
 	color: var(--color--text);
 	cursor: pointer;
+	transition-property: scale, border-color;
+	transition-duration: 100ms;
+
+	/* Extend the hit area vertically; ±4px horizontally stays inside the 8px gap */
+	&::before {
+		content: '';
+		position: absolute;
+		inset: -6px -4px;
+	}
 
 	&:hover {
 		border-color: var(--color--text--tint-1);
 	}
+
+	&:active {
+		scale: 0.96;
+	}
 }
 
 .looksGoodButton {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: var(--spacing--2xs);
@@ -201,9 +225,21 @@ const title = computed(() => {
 	font-size: var(--font-size--2xs);
 	font-weight: var(--font-weight--bold);
 	cursor: pointer;
+	transition-property: scale, filter;
+	transition-duration: 100ms;
+
+	&::before {
+		content: '';
+		position: absolute;
+		inset: -6px -4px;
+	}
 
 	&:hover {
 		filter: brightness(1.05);
+	}
+
+	&:active {
+		scale: 0.96;
 	}
 }
 </style>

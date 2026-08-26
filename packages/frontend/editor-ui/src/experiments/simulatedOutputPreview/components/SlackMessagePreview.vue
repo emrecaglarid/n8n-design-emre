@@ -107,6 +107,7 @@ const time = computed(() =>
 	color: var(--color--text);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+	text-wrap: pretty;
 	max-height: 180px;
 	overflow-y: auto;
 }
