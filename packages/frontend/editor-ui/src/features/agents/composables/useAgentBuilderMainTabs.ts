@@ -7,9 +7,16 @@ import { useI18n, type BaseTextKey } from '@n8n/i18n';
 import { useAgentEvalsFlag } from '@/features/ai/evaluation.ee/composables/useAgentEvalsFlag';
 import { EXECUTIONS_SECTION_KEY } from '../constants';
 
-export type AgentBuilderMainTab = 'agent' | 'knowledge' | 'sessions' | 'settings' | 'evals';
+export type AgentBuilderMainTab =
+	| 'preview'
+	| 'agent'
+	| 'knowledge'
+	| 'sessions'
+	| 'settings'
+	| 'evals';
 
 type AgentBuilderSection =
+	| 'preview'
 	| 'knowledge'
 	| typeof EXECUTIONS_SECTION_KEY
 	| 'settings'
@@ -29,6 +36,7 @@ function getSectionFromQuery(
 	// A deep link to the evals surface falls back to the default tab while the
 	// flag is off, rather than selecting a tab that isn't in the row.
 	if (value === 'evals' && isEvalsEnabled) return 'evals';
+	if (value === 'preview' && isEvalsEnabled) return 'preview';
 	return null;
 }
 
@@ -37,6 +45,7 @@ function getSectionFromTab(tab: AgentBuilderMainTab): AgentBuilderSection {
 	if (tab === 'sessions') return EXECUTIONS_SECTION_KEY;
 	if (tab === 'settings') return 'settings';
 	if (tab === 'evals') return 'evals';
+	if (tab === 'preview') return 'preview';
 	return null;
 }
 
@@ -67,6 +76,7 @@ export function useAgentBuilderMainTabs({
 			if (selectedSection.value === EXECUTIONS_SECTION_KEY) return 'sessions';
 			if (selectedSection.value === 'settings') return 'settings';
 			if (selectedSection.value === 'evals') return 'evals';
+			if (selectedSection.value === 'preview') return 'preview';
 			return 'agent';
 		},
 		set(tab) {
@@ -75,6 +85,14 @@ export function useAgentBuilderMainTabs({
 	});
 
 	const mainTabOptions = computed<Array<{ label: string; value: AgentBuilderMainTab }>>(() => [
+		...(isEvalsEnabled.value
+			? [
+					{
+						label: i18n.baseText('agents.builder.header.tab.preview' as BaseTextKey),
+						value: 'preview' as const,
+					},
+				]
+			: []),
 		{ label: i18n.baseText('agents.builder.header.tab.agent'), value: 'agent' },
 		{
 			label: i18n.baseText('agents.builder.header.tab.knowledge' as BaseTextKey),

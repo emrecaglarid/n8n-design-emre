@@ -26,6 +26,7 @@ import AgentMemoryPanel from './AgentMemoryPanel.vue';
 import AgentSubAgentsPanel from './AgentSubAgentsPanel.vue';
 import AgentBuilderTabPanel from './AgentBuilderTabPanel.vue';
 import AgentEvalsSection from './AgentEvalsSection.vue';
+import AgentPreviewStage from '@/experiments/agentPreviewStage/AgentPreviewStage.vue';
 
 const props = defineProps<{
 	activeMainTab: AgentBuilderMainTab;
@@ -260,6 +261,20 @@ const i18n = useI18n();
 							/>
 						</N8nCard>
 					</div>
+				</AgentBuilderTabPanel>
+
+				<AgentBuilderTabPanel
+					v-else-if="activeMainTab === 'preview'"
+					data-testid="agent-preview-tab-content"
+				>
+					<AgentPreviewStage
+						:project-id="projectId"
+						:agent-id="agentId"
+						:agent-name="localConfig?.name"
+						:agent-unsaved="agentUnsaved"
+						:disabled="childrenDisabled"
+						:can-run="canExecuteAgent"
+					/>
 				</AgentBuilderTabPanel>
 
 				<AgentBuilderTabPanel
