@@ -133,6 +133,7 @@ import { useFocusPanelStore } from '@/app/stores/focusPanel.store';
 import { useEvaluationsWizardSidepanelStore } from '@/features/ai/evaluation.ee/wizardSidepanel.store';
 import { useEvaluationsWizardSidepanelExperiment } from '@/experiments/evaluationsWizardSidepanel/useEvaluationsWizardSidepanelExperiment';
 import EvaluationsCanvasInfoCard from '@/features/ai/evaluation.ee/components/EvaluationsCanvasInfoCard/EvaluationsCanvasInfoCard.vue';
+import SimulatedOutputOverlay from '@/experiments/simulatedOutputPreview/components/SimulatedOutputOverlay.vue';
 import { useChatHubPanelStore } from '@/features/ai/chatHub/chatHubPanel.store';
 import { useKeybindings } from '@/app/composables/useKeybindings';
 import { type ContextMenuAction } from '@/features/shared/contextMenu/composables/useContextMenuItems';
@@ -2107,6 +2108,11 @@ onBeforeUnmount(() => {
 				/>
 			</div>
 
+			<SimulatedOutputOverlay
+				v-if="!isCanvasReadOnly"
+				:class="$style.simulatedOutputOverlayWrapper"
+			/>
+
 			<N8nCallout
 				v-if="isReadOnlyEnvironment"
 				theme="warning"
@@ -2192,6 +2198,14 @@ onBeforeUnmount(() => {
 	.chatButton {
 		align-self: stretch;
 	}
+}
+
+.simulatedOutputOverlayWrapper {
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: calc(var(--spacing--sm) + 64px);
+	z-index: var.$index-popper;
 }
 
 .setupCredentialsButtonWrapper {
