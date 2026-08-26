@@ -93,7 +93,7 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 <template>
 	<div
 		v-if="store.isPillActive || store.hasPreviews"
-		:class="$style.overlay"
+		:class="[$style.overlay, !store.isPillActive && $style.lifted]"
 		data-test-id="simulated-output-overlay"
 	>
 		<!-- Deck of output previews -->
@@ -229,6 +229,11 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 	}
 }
 
+/* When the pill is gone the Execute button is back at the bottom — keep the deck clear of it */
+.lifted {
+	padding-bottom: 64px;
+}
+
 .deck {
 	display: flex;
 	flex-direction: column;
@@ -241,24 +246,25 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 	}
 }
 
-/* Peeking header of a card behind the front one */
+/* Peeking header of a card behind the front one: visible part stays shorter
+   than the front card's own header (~32px visible, 14px tucked underneath) */
 .behindBar {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	gap: var(--spacing--2xs);
 	width: 528px;
 	max-width: 86vw;
-	margin-bottom: calc(-1 * var(--spacing--2xs) - 4px);
-	padding: var(--spacing--2xs) var(--spacing--xs) calc(var(--spacing--2xs) + 8px);
+	height: 46px;
+	margin-bottom: calc(-1 * var(--spacing--sm) - 2px);
+	padding: var(--spacing--2xs) var(--spacing--xs);
 	background: var(--color--background--light-2, var(--color--background));
 	border: var(--border);
 	border-radius: var(--radius--lg) var(--radius--lg) 0 0;
 	box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
 	cursor: pointer;
-	opacity: 0.85;
 
 	&:hover {
-		opacity: 1;
+		background: var(--color--background--light-3, var(--color--background));
 	}
 }
 

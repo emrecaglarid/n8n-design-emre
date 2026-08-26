@@ -2208,7 +2208,7 @@ const simulatedOutputPreviewStore = useSimulatedOutputPreviewStore();
 	position: absolute;
 	left: 50%;
 	transform: translateX(-50%);
-	bottom: calc(var(--spacing--sm) + 64px);
+	bottom: var(--spacing--sm);
 	z-index: var.$index-popper;
 }
 
