@@ -1336,6 +1336,10 @@ async function dismissComposerContextChip() {
 						:class="$style.previewPanel"
 					>
 						<InstanceAiPreviewTabBar
+							v-if="
+								preview.allArtifactTabs.value.find((tab) => tab.id === preview.activeTabId.value)
+									?.type !== 'agent'
+							"
 							:tabs="preview.allArtifactTabs.value"
 							:active-tab-id="preview.activeTabId.value"
 							:is-expanded="isPreviewExpanded"

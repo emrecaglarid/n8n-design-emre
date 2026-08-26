@@ -96,14 +96,6 @@ const i18n = useI18n();
 		data-testid="agent-builder-editor-column"
 	>
 		<div :class="$style.panelArea">
-			<div :class="$style.identityHeaderRow" data-testid="agent-builder-identity-header">
-				<AgentIdentityHeader
-					:config="localConfig"
-					:disabled="childrenDisabled"
-					:class="$style.identityHeader"
-					@update:config="emit('update:config', $event)"
-				/>
-			</div>
 			<div :class="$style.tabsRow" data-testid="agent-tabs-row">
 				<div :class="$style.tabsRule" data-testid="agent-tabs-rule">
 					<N8nTabs
@@ -114,6 +106,18 @@ const i18n = useI18n();
 						@update:model-value="emit('update:activeMainTab', $event)"
 					/>
 				</div>
+			</div>
+			<div
+				v-if="activeMainTab !== 'preview'"
+				:class="$style.identityHeaderRow"
+				data-testid="agent-builder-identity-header"
+			>
+				<AgentIdentityHeader
+					:config="localConfig"
+					:disabled="childrenDisabled"
+					:class="$style.identityHeader"
+					@update:config="emit('update:config', $event)"
+				/>
 			</div>
 			<div
 				:class="[

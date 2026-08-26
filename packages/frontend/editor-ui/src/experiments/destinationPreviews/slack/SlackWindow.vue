@@ -1,18 +1,57 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from 'vue';
+
 /**
  * AI Trust prototype: a realistic Slack desktop channel window (title bar,
  * channel header, message area, composer). Content goes into the default slot,
  * usually a list of SlackMessage rows. The "Simulated preview" marker in the
  * title bar is the honesty cue — this chrome is convincing on purpose, so the
  * marker is not optional by default.
+ *
+ * With `interactive`, the composer is a live input: `v-model` + a `send` emit.
  */
-withDefaults(
+const props = withDefaults(
 	defineProps<{
 		channelName: string;
 		simulatedLabel?: string;
+		interactive?: boolean;
+		modelValue?: string;
+		sendDisabled?: boolean;
 	}>(),
-	{ simulatedLabel: 'Simulated preview — nothing sent' },
+	{
+		simulatedLabel: 'Simulated preview — nothing sent',
+		interactive: false,
+		modelValue: '',
+		sendDisabled: false,
+	},
 );
+
+const emit = defineEmits<{
+	'update:modelValue': [value: string];
+	send: [];
+}>();
+
+function onInput(event: Event) {
+	emit('update:modelValue', (event.target as HTMLInputElement).value);
+}
+
+function onSend() {
+	if (props.sendDisabled) return;
+	emit('send');
+}
+
+const bodyEl = ref<HTMLElement | null>(null);
+let observer: MutationObserver | undefined;
+
+onMounted(() => {
+	if (!bodyEl.value) return;
+	observer = new MutationObserver(() => {
+		if (bodyEl.value) bodyEl.value.scrollTop = bodyEl.value.scrollHeight;
+	});
+	observer.observe(bodyEl.value, { childList: true, subtree: true, characterData: true });
+});
+
+onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
@@ -45,21 +84,39 @@ withDefaults(
 				>#{{ channelName.replace(/^#/, '') }} <span :class="$style.chevron">▾</span></span
 			>
 		</div>
-		<div :class="$style.body">
-			<div :class="$style.dateDivider">
-				<span :class="$style.dateLine" />
-				<span :class="$style.datePill">Today</span>
-				<span :class="$style.dateLine" />
-			</div>
+		<div ref="bodyEl" :class="$style.body">
 			<slot />
 		</div>
 		<div :class="$style.composer">
+			<slot name="beforeComposer" />
 			<div :class="$style.composerBox">
-				<span :class="$style.composerPlaceholder"
+				<input
+					v-if="interactive"
+					:value="modelValue"
+					:class="$style.composerInput"
+					:placeholder="`Message #${channelName.replace(/^#/, '')}`"
+					data-testid="slack-composer-input"
+					@input="onInput"
+					@keydown.enter.prevent="onSend"
+				/>
+				<span v-else :class="$style.composerPlaceholder"
 					>Message #{{ channelName.replace(/^#/, '') }}</span
 				>
 				<div :class="$style.composerActions">
-					<span :class="$style.sendButton">
+					<button
+						v-if="interactive"
+						:class="[$style.sendButton, sendDisabled && $style.sendDisabled]"
+						:disabled="sendDisabled"
+						data-testid="slack-composer-send"
+						@click="onSend"
+					>
+						<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+							<path
+								d="M3.4 20.4 20.85 12.92a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91Z"
+							/>
+						</svg>
+					</button>
+					<span v-else :class="$style.sendButton">
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
 							<path
 								d="M3.4 20.4 20.85 12.92a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91Z"
@@ -90,6 +147,7 @@ withDefaults(
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	flex-shrink: 0;
 	height: 38px;
 	padding: 0 14px;
 	background: #350d36;
@@ -130,6 +188,7 @@ withDefaults(
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	flex-shrink: 0;
 	padding: 10px 20px;
 	border-bottom: 1px solid rgba(29, 28, 29, 0.13);
 }
@@ -145,17 +204,6 @@ withDefaults(
 	color: #616061;
 }
 
-.headerMeta {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	font-size: 12px;
-	color: #616061;
-	border: 1px solid rgba(29, 28, 29, 0.13);
-	border-radius: 4px;
-	padding: 2px 8px;
-}
-
 .body {
 	display: flex;
 	flex-direction: column;
@@ -167,29 +215,11 @@ withDefaults(
 	overflow-y: auto;
 }
 
-.dateDivider {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 0 20px 8px;
-}
-
-.dateLine {
-	flex-grow: 1;
-	height: 1px;
-	background: rgba(29, 28, 29, 0.13);
-}
-
-.datePill {
-	font-size: 12px;
-	font-weight: 700;
-	color: #1d1c1d;
-	border: 1px solid rgba(29, 28, 29, 0.13);
-	border-radius: 20px;
-	padding: 3px 10px;
-}
-
 .composer {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex-shrink: 0;
 	padding: 0 20px 20px;
 }
 
@@ -201,6 +231,20 @@ withDefaults(
 	border: 1px solid rgba(29, 28, 29, 0.25);
 	border-radius: 8px;
 	padding: 9px 10px 9px 12px;
+}
+
+.composerInput {
+	flex-grow: 1;
+	border: none;
+	outline: none;
+	font-family: inherit;
+	font-size: 15px;
+	color: #1d1c1d;
+	background: transparent;
+
+	&::placeholder {
+		color: #616061;
+	}
 }
 
 .composerPlaceholder {
@@ -219,8 +263,21 @@ withDefaults(
 	justify-content: center;
 	width: 28px;
 	height: 26px;
+	border: none;
 	border-radius: 4px;
 	background: #007a5a;
 	color: #fff;
+	cursor: pointer;
+	transition-property: scale;
+	transition-duration: 100ms;
+
+	&:active:not(:disabled) {
+		scale: 0.96;
+	}
+}
+
+.sendDisabled {
+	opacity: 0.5;
+	cursor: default;
 }
 </style>

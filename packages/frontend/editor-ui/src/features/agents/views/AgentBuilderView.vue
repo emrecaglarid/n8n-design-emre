@@ -328,6 +328,12 @@ const visibleMainTabOptions = computed(() =>
 		: mainTabOptions.value,
 );
 
+// AI Trust prototype: the Preview stage supersedes the demo chat dock — the
+// stage's composer is the chat, so the dock stays hidden while Preview is active.
+const isDockEffectivelyOpen = computed(
+	() => isPreviewDockOpen.value && activeMainTab.value !== 'preview',
+);
+
 const { ensureLoaded: ensureIntegrationsCatalog } = useAgentIntegrationsCatalog();
 
 const builderTelemetry = useAgentBuilderTelemetry({
@@ -1842,7 +1848,7 @@ function onSwitchAgent(nextAgentId: string) {
 			:class="[
 				$style.builder,
 				{
-					[$style.previewOpen]: isPreviewDockOpen,
+					[$style.previewOpen]: isDockEffectivelyOpen,
 					[$style.standalonePreview]: isStandalonePreview,
 				},
 			]"
@@ -1951,7 +1957,7 @@ function onSwitchAgent(nextAgentId: string) {
 
 				<AgentPreviewDock
 					v-if="!isStandalonePreview"
-					:is-open="isPreviewDockOpen"
+					:is-open="isDockEffectivelyOpen"
 					:session-title="currentSessionTitle"
 					:session-options="sessionMenu"
 					:has-session="currentSessionHasMessages"
