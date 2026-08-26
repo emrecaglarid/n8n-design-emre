@@ -115,7 +115,12 @@ const i18n = useI18n();
 					/>
 				</div>
 			</div>
-			<div :class="$style.panelAreaContainer">
+			<div
+				:class="[
+					$style.panelAreaContainer,
+					activeMainTab === 'preview' && $style.panelAreaFullBleed,
+				]"
+			>
 				<AgentBuilderTabPanel v-if="activeMainTab === 'agent'" data-testid="agent-tab-content">
 					<AgentChannelsSection
 						:key="`${projectId}:${agentId}`"
@@ -263,8 +268,9 @@ const i18n = useI18n();
 					</div>
 				</AgentBuilderTabPanel>
 
-				<AgentBuilderTabPanel
+				<div
 					v-else-if="activeMainTab === 'preview'"
+					:class="$style.previewPanel"
 					data-testid="agent-preview-tab-content"
 				>
 					<AgentPreviewStage
@@ -275,7 +281,7 @@ const i18n = useI18n();
 						:disabled="childrenDisabled"
 						:can-run="canExecuteAgent"
 					/>
-				</AgentBuilderTabPanel>
+				</div>
 
 				<AgentBuilderTabPanel
 					v-else-if="activeMainTab === 'evals'"
@@ -318,6 +324,18 @@ const i18n = useI18n();
 	scrollbar-width: thin;
 	scrollbar-color: var(--border-color) transparent;
 	scrollbar-gutter: stable;
+}
+
+.panelAreaFullBleed {
+	max-width: none;
+	padding: 0;
+}
+
+.previewPanel {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
 }
 
 .panelAreaContainer {

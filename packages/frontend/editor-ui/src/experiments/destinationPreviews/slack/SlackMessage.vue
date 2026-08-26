@@ -105,11 +105,7 @@ const segments = computed(() => {
 	display: flex;
 	gap: 8px;
 	padding: 4px 20px;
-	font-family:
-		'Lato',
-		'Inter',
-		-apple-system,
-		sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
 }
 
 .avatar {
@@ -139,7 +135,7 @@ const segments = computed(() => {
 
 .author {
 	font-size: 15px;
-	font-weight: 900;
+	font-weight: 700;
 	color: #1d1c1d;
 }
 

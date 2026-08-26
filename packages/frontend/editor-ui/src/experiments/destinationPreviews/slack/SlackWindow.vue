@@ -9,10 +9,9 @@
 withDefaults(
 	defineProps<{
 		channelName: string;
-		memberCount?: number;
 		simulatedLabel?: string;
 	}>(),
-	{ memberCount: 3, simulatedLabel: 'Simulated preview — nothing sent' },
+	{ simulatedLabel: 'Simulated preview — nothing sent' },
 );
 </script>
 
@@ -45,24 +44,6 @@ withDefaults(
 			<span :class="$style.channelName"
 				>#{{ channelName.replace(/^#/, '') }} <span :class="$style.chevron">▾</span></span
 			>
-			<span :class="$style.headerMeta">
-				<svg
-					width="14"
-					height="14"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-					<circle cx="9" cy="7" r="4" />
-					<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-					<path d="M16 3.13a4 4 0 0 1 0 7.75" />
-				</svg>
-				{{ memberCount }}
-			</span>
 		</div>
 		<div :class="$style.body">
 			<div :class="$style.dateDivider">
@@ -78,7 +59,6 @@ withDefaults(
 					>Message #{{ channelName.replace(/^#/, '') }}</span
 				>
 				<div :class="$style.composerActions">
-					<span :class="$style.composerIcons">＋&nbsp;&nbsp;Aa&nbsp;&nbsp;😊&nbsp;&nbsp;@</span>
 					<span :class="$style.sendButton">
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
 							<path
@@ -97,16 +77,13 @@ withDefaults(
 	display: flex;
 	flex-direction: column;
 	width: 100%;
+	height: 100%;
 	background: #fff;
 	border-radius: 10px;
 	overflow: hidden;
-	border: 1px solid rgba(0, 0, 0, 0.35);
+	border: 1px solid rgba(0, 0, 0, 0.18);
 	box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-	font-family:
-		'Lato',
-		'Inter',
-		-apple-system,
-		sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
 }
 
 .titleBar {
@@ -158,8 +135,8 @@ withDefaults(
 }
 
 .channelName {
-	font-size: 16px;
-	font-weight: 900;
+	font-size: 15px;
+	font-weight: 700;
 	color: #1d1c1d;
 }
 
@@ -182,9 +159,12 @@ withDefaults(
 .body {
 	display: flex;
 	flex-direction: column;
+	justify-content: flex-end;
 	gap: 8px;
+	flex-grow: 1;
+	min-height: 180px;
 	padding: 12px 0 16px;
-	min-height: 220px;
+	overflow-y: auto;
 }
 
 .dateDivider {
@@ -215,11 +195,12 @@ withDefaults(
 
 .composerBox {
 	display: flex;
-	flex-direction: column;
+	align-items: center;
+	justify-content: space-between;
 	gap: 10px;
-	border: 1px solid rgba(29, 28, 29, 0.3);
+	border: 1px solid rgba(29, 28, 29, 0.25);
 	border-radius: 8px;
-	padding: 10px 12px;
+	padding: 9px 10px 9px 12px;
 }
 
 .composerPlaceholder {
@@ -230,13 +211,6 @@ withDefaults(
 .composerActions {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-}
-
-.composerIcons {
-	font-size: 13px;
-	color: #616061;
-	letter-spacing: 0.05em;
 }
 
 .sendButton {

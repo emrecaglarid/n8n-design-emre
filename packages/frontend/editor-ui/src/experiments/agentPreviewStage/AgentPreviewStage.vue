@@ -11,7 +11,6 @@ import {
 	resolveReviewRowView,
 } from '@/features/agents/utils/agent-eval-review';
 import type { AgentEvalVote } from '@/features/agents/agentEvals.types';
-import AgentEvalVoteButtons from '@/features/agents/components/AgentEvalVoteButtons.vue';
 import SlackWindow from '@/experiments/destinationPreviews/slack/SlackWindow.vue';
 import SlackMessage from '@/experiments/destinationPreviews/slack/SlackMessage.vue';
 
@@ -51,11 +50,12 @@ const results = computed(() => review.value?.results ?? []);
 const inFlight = computed(() => (runId.value ? store.isRunInFlight(runId.value) : false));
 const reviewedCount = computed(() => (runId.value ? store.reviewedCount(runId.value) : 0));
 
-const mode = computed<'unsaved' | 'loading' | 'empty' | 'cases' | 'run'>(() => {
+const mode = computed<'unsaved' | 'loading' | 'generating' | 'empty' | 'cases' | 'run'>(() => {
 	if (props.agentUnsaved) return 'unsaved';
 	if (!hasSettled.value) return 'loading';
 	if (runId.value) return 'run';
 	if (dataset.value && cases.value.length > 0) return 'cases';
+	if (generating.value || store.isGeneratingCases(props.agentId)) return 'generating';
 	return 'empty';
 });
 
@@ -196,9 +196,49 @@ async function saveCurrent() {
 	if (!id || !result) return;
 	try {
 		await store.saveReview(props.projectId, props.agentId, id, result.id);
+		flyToEvalsTab();
 	} catch (error) {
 		toast.showError(error, 'Could not save the review');
 	}
+}
+
+const windowWrapper = ref<HTMLElement | null>(null);
+
+/** Clone the scene and fly it into the Evals tab so the save has a visible destination */
+function flyToEvalsTab() {
+	const source = windowWrapper.value;
+	const tabs = document.querySelector('[data-testid="agent-header-tabs"]');
+	const target = tabs
+		? Array.from(tabs.querySelectorAll<HTMLElement>('*')).find(
+				(el) => el.childElementCount === 0 && el.textContent?.trim() === 'Evals',
+			)
+		: undefined;
+	if (!source || !target) return;
+
+	const from = source.getBoundingClientRect();
+	const to = target.getBoundingClientRect();
+	const ghost = source.cloneNode(true) as HTMLElement;
+	Object.assign(ghost.style, {
+		position: 'fixed',
+		left: `${from.left}px`,
+		top: `${from.top}px`,
+		width: `${from.width}px`,
+		height: `${from.height}px`,
+		margin: '0',
+		zIndex: '9999',
+		pointerEvents: 'none',
+		transformOrigin: 'top left',
+		transition: 'transform 480ms cubic-bezier(0.4, 0, 0.2, 1), opacity 480ms ease-in',
+	});
+	document.body.appendChild(ghost);
+	requestAnimationFrame(() => {
+		const scale = Math.max(0.04, Math.min(to.width / from.width, to.height / from.height));
+		const dx = to.left + to.width / 2 - (from.left + (from.width * scale) / 2);
+		const dy = to.top + to.height / 2 - (from.top + (from.height * scale) / 2);
+		ghost.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+		ghost.style.opacity = '0.15';
+		setTimeout(() => ghost.remove(), 500);
+	});
 }
 
 function onCancelDraft() {
@@ -218,6 +258,18 @@ function nextScene() {
 watch(runId, (id, previous) => {
 	if (id && id !== previous) void openCurrentRun();
 });
+
+// A dataset can appear from outside this tab (the assistant thread's
+// "Generate test cases" lands here) — fetch its cases as soon as it exists.
+watch(
+	() => dataset.value?.id,
+	(id, previous) => {
+		if (id && id !== previous && !runId.value && caseSource.value) {
+			void store.fetchCases(props.projectId, caseSource.value);
+			sceneIndex.value = 0;
+		}
+	},
+);
 
 watch(inFlight, (now, was) => {
 	if (was && !now) void openCurrentRun();
@@ -240,6 +292,16 @@ onBeforeUnmount(store.stopPollingRun);
 
 		<template v-else-if="mode === 'loading'">
 			<span :class="$style.stageHint">Setting the stage…</span>
+		</template>
+
+		<template v-else-if="mode === 'generating'">
+			<div :class="$style.emptyState">
+				<span :class="$style.emptyTitle">Drafting scenes…</span>
+				<span :class="$style.emptyBody">
+					Writing realistic requests from the agent's instructions, including a few that try to
+					break its rules.
+				</span>
+			</div>
 		</template>
 
 		<template v-else-if="mode === 'empty'">
@@ -270,19 +332,21 @@ onBeforeUnmount(store.stopPollingRun);
 				</span>
 			</div>
 
-			<SlackWindow :channel-name="channelName">
-				<SlackMessage :author-name="PERSONA_NAME" :time="sceneTime" :text="requestText" />
-				<SlackMessage
-					v-if="mode === 'run'"
-					:author-name="agentDisplayName"
-					:time="sceneTime"
-					:text="resultStatus === 'error' ? 'The agent errored on this scene.' : answerText"
-					:pending="resultStatus === 'running' || resultStatus === 'new'"
-					:error="resultStatus === 'error'"
-					app-badge
-					avatar-color="#E8912D"
-				/>
-			</SlackWindow>
+			<div ref="windowWrapper" :class="$style.windowWrapper">
+				<SlackWindow :channel-name="channelName">
+					<SlackMessage :author-name="PERSONA_NAME" :time="sceneTime" :text="requestText" />
+					<SlackMessage
+						v-if="mode === 'run'"
+						:author-name="agentDisplayName"
+						:time="sceneTime"
+						:text="resultStatus === 'error' ? 'The agent errored on this scene.' : answerText"
+						:pending="resultStatus === 'running' || resultStatus === 'new'"
+						:error="resultStatus === 'error'"
+						app-badge
+						avatar-color="#E8912D"
+					/>
+				</SlackWindow>
+			</div>
 
 			<div v-if="mode === 'cases' && whatToCheck" :class="$style.checkHint">
 				<span :class="$style.checkLabel">Checking for:</span> {{ whatToCheck }}
@@ -321,11 +385,52 @@ onBeforeUnmount(store.stopPollingRun);
 						</N8nButton>
 					</template>
 					<template v-else-if="mode === 'run' && currentResult">
-						<AgentEvalVoteButtons
-							:vote="currentVote"
+						<button
+							:class="[$style.thumbDownButton, currentVote === 'down' && $style.thumbDownSelected]"
 							:disabled="disabled || resultStatus !== 'success'"
-							@vote="onVote"
-						/>
+							title="Not right"
+							data-testid="agent-preview-vote-down"
+							@click="onVote('down')"
+						>
+							<svg
+								width="18"
+								height="18"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M17 14V2" />
+								<path
+									d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"
+								/>
+							</svg>
+						</button>
+						<button
+							:class="[$style.looksGoodButton, currentVote === 'up' && $style.looksGoodSelected]"
+							:disabled="disabled || resultStatus !== 'success'"
+							data-testid="agent-preview-vote-up"
+							@click="onVote('up')"
+						>
+							<svg
+								width="17"
+								height="17"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M7 10v12" />
+								<path
+									d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"
+								/>
+							</svg>
+							Looks good
+						</button>
 					</template>
 				</div>
 			</div>
@@ -364,10 +469,18 @@ onBeforeUnmount(store.stopPollingRun);
 	justify-content: flex-start;
 	gap: 14px;
 	width: 100%;
-	min-height: 640px;
+	flex-grow: 1;
+	min-height: 0;
 	padding: 40px;
-	border-radius: var(--radius--lg);
 	background: radial-gradient(120% 130% at 50% 0%, #4a154b 0%, #2c0b2d 55%, #1a061b 100%);
+}
+
+.windowWrapper {
+	display: flex;
+	width: 100%;
+	max-width: 680px;
+	flex-grow: 1;
+	min-height: 0;
 }
 
 .stageTop {
@@ -461,11 +574,70 @@ onBeforeUnmount(store.stopPollingRun);
 .verdictGroup {
 	display: flex;
 	align-items: center;
+	gap: 10px;
+}
+
+.thumbDownButton {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 40px;
+	background: #fff;
+	border: 1px solid rgba(0, 0, 0, 0.15);
+	border-radius: var(--radius--md);
+	color: var(--color--text);
+	cursor: pointer;
+	transition-property: scale;
+	transition-duration: 100ms;
+
+	&:active:not(:disabled) {
+		scale: 0.96;
+	}
+
+	&:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+}
+
+.thumbDownSelected {
+	border-color: var(--color--primary);
+	color: var(--color--primary);
+}
+
+.looksGoodButton {
+	display: flex;
+	align-items: center;
 	gap: 8px;
-	/* The design-system vote buttons sit on dark ground here */
-	background: rgba(255, 255, 255, 0.92);
-	border-radius: var(--radius--lg);
-	padding: 4px;
+	height: 40px;
+	padding: 0 16px;
+	background: var(--color--primary);
+	border: none;
+	border-radius: var(--radius--md);
+	color: #fff;
+	font-size: var(--font-size--2xs);
+	font-weight: var(--font-weight--bold);
+	cursor: pointer;
+	transition-property: scale, filter;
+	transition-duration: 100ms;
+
+	&:hover:not(:disabled) {
+		filter: brightness(1.05);
+	}
+
+	&:active:not(:disabled) {
+		scale: 0.96;
+	}
+
+	&:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+}
+
+.looksGoodSelected {
+	filter: saturate(0.7) brightness(0.95);
 }
 
 .reasonCard {

@@ -1197,7 +1197,9 @@ watch(
 
 		const request = agentEvalsStore.consumeEvalsFocus(agentId.value);
 		if (!request) return;
-		activeMainTab.value = 'evals';
+		// AI Trust prototype: eval requests raised from the assistant thread land on
+		// the Preview stage, where the generated scenes are the interaction surface.
+		activeMainTab.value = 'preview';
 		if (request.generate) void onGenerateEvalCases();
 	},
 	{ immediate: true },
