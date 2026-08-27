@@ -292,6 +292,12 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 	const setSettings = (newSettings: FrontendSettings) => {
 		settings.value = newSettings;
 
+		// AI Trust prototype (design fork only): force the licensed diff view on
+		// so we can study it as a surface for comparing outputs.
+		if (settings.value.enterprise) {
+			settings.value.enterprise.workflowDiffs = true;
+		}
+
 		userManagement.value = newSettings.userManagement;
 		if (userManagement.value) {
 			userManagement.value.showSetupOnFirstLoad =
