@@ -81,6 +81,7 @@ import InstanceAiConfirmationPanel from './components/InstanceAiConfirmationPane
 import InstanceAiFixWithAiPanel from './components/InstanceAiFixWithAiPanel.vue';
 import InstanceAiTestAgentPanel from './components/InstanceAiTestAgentPanel.vue';
 import InstanceAiPreviewTabBar from './components/InstanceAiPreviewTabBar.vue';
+import AgentCrewPanel from '@/experiments/agentCrew/AgentCrewPanel.vue';
 import InstanceAiViewHeader from './components/InstanceAiViewHeader.vue';
 import WorkflowBuilderUnavailableNotice from './components/WorkflowBuilderUnavailableNotice.vue';
 import AgentSection from './components/AgentSection.vue';
@@ -1222,6 +1223,15 @@ async function dismissComposerContextChip() {
 
 								<div :class="$style.inputContainer">
 									<div :class="$style.inputConstraint">
+										<AgentCrewPanel
+											v-if="
+												isAgentEvalsEnabled &&
+												preview.activeAgentId.value &&
+												preview.activeAgentProjectId.value
+											"
+											:project-id="preview.activeAgentProjectId.value"
+											:agent-id="preview.activeAgentId.value"
+										/>
 										<WorkflowBuilderUnavailableNotice
 											v-if="!settingsStore.isWorkflowBuilderAvailable"
 										/>

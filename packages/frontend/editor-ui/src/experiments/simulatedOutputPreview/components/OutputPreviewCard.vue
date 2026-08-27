@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { N8nIcon } from '@n8n/design-system';
 import NodeIcon from '@/app/components/NodeIcon.vue';
 import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
@@ -7,6 +7,8 @@ import { GOOGLE_GMAIL_NODE_TYPE } from '@/app/constants/nodeTypes';
 import type { SimulatedPreview, PreviewVerdict } from '../simulatedOutputPreview.store';
 import SlackMessagePreview from './SlackMessagePreview.vue';
 import EmailPreview from './EmailPreview.vue';
+import SurfaceDialSelector from '@/experiments/destinationPreviews/SurfaceDialSelector.vue';
+import type { DestinationNotch } from '@/experiments/destinationPreviews/surfaceDial';
 
 const props = defineProps<{
 	preview: SimulatedPreview;
@@ -24,6 +26,17 @@ const title = computed(() => {
 	if (props.preview.kind === 'slack') return 'Slack message';
 	return props.preview.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Gmail' : 'Email';
 });
+
+// The surface is fixed by the destination node; only the notch moves. The
+// draft target follows the surface so the honesty text stays plausible.
+const surface = computed(() => props.preview.kind);
+const notch = ref<DestinationNotch>('simulated');
+const draftTarget = computed(() =>
+	props.preview.kind === 'slack' ? '#test-invoices' : 'a draft in your own inbox',
+);
+const honestyChip = computed(() =>
+	notch.value === 'draft' ? 'Draft — nothing external' : 'Preview only',
+);
 </script>
 
 <template>
@@ -35,7 +48,7 @@ const title = computed(() => {
 		<div :class="$style.header">
 			<NodeIcon :node-type="nodeType" :size="16" />
 			<span :class="$style.title">{{ title }}</span>
-			<span :class="$style.previewOnly">Preview only</span>
+			<span :class="$style.previewOnly">{{ honestyChip }}</span>
 			<button :class="$style.closeButton" title="Close" @click="emit('close')">
 				<N8nIcon icon="x" size="small" />
 			</button>
@@ -56,6 +69,13 @@ const title = computed(() => {
 			/>
 		</div>
 		<div :class="$style.footer">
+			<SurfaceDialSelector
+				v-model:notch="notch"
+				:surface="surface"
+				:surfaces="[surface]"
+				:draft-target="draftTarget"
+				:class="$style.dialSelector"
+			/>
 			<button
 				:class="$style.thumbsDownButton"
 				title="Not right"
@@ -174,11 +194,17 @@ const title = computed(() => {
 
 .footer {
 	display: flex;
-	align-items: stretch;
-	justify-content: flex-end;
+	align-items: center;
+	justify-content: space-between;
 	gap: var(--spacing--2xs);
 	padding: var(--spacing--2xs) var(--spacing--xs);
 	border-top: var(--border);
+}
+
+.dialSelector {
+	flex-shrink: 1;
+	min-width: 0;
+	margin-right: auto;
 }
 
 .thumbsDownButton {

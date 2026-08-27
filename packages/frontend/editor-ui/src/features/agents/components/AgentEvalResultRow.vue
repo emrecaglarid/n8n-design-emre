@@ -22,12 +22,16 @@ import { readAgentAnswer, readCaseRequest } from '../utils/agent-eval-review';
 import { toDisplayToolCalls } from '../utils/agent-eval-tool-calls';
 import AgentEvalToolCalls from './AgentEvalToolCalls.vue';
 import AgentEvalVoteButtons from './AgentEvalVoteButtons.vue';
+import SlackMessage from '@/experiments/destinationPreviews/slack/SlackMessage.vue';
+import type { PreviewSurface } from '@/experiments/destinationPreviews/surfaceDial';
 
 const props = defineProps<{
 	result: AgentEvalResultRecord;
 	view: ReviewRowView;
 	disabled?: boolean;
 	projectId?: string;
+	/** AI Trust prototype: which destination chrome renders the answer */
+	surface?: PreviewSurface;
 }>();
 
 const emit = defineEmits<{
@@ -140,8 +144,21 @@ const showFooter = computed(() => toolCalls.value.length > 0 || showFooterEdit.v
 		>
 			{{ i18n.baseText('agents.builder.agentEvals.review.row.agentAnswered') }}
 		</N8nText>
-		<div :class="[$style.answer, { [$style.answerMuted]: Boolean(settledCorrection) }]">
-			<N8nText v-if="agentAnswer" size="small" color="text-base">{{ agentAnswer }}</N8nText>
+		<div
+			:class="[
+				$style.answer,
+				{ [$style.answerMuted]: Boolean(settledCorrection) },
+				{ [$style.answerSlack]: surface === 'slack' && Boolean(agentAnswer) },
+			]"
+		>
+			<SlackMessage
+				v-if="surface === 'slack' && agentAnswer"
+				author-name="Your agent"
+				app-badge
+				avatar-color="#E8912D"
+				:text="agentAnswer"
+			/>
+			<N8nText v-else-if="agentAnswer" size="small" color="text-base">{{ agentAnswer }}</N8nText>
 			<!-- A case that hasn't finished has no answer *yet*; saying it returned none
 			     would report a failure that hasn't happened. -->
 			<span v-else-if="isPending" :class="$style.awaiting">
@@ -345,6 +362,14 @@ const showFooter = computed(() => toolCalls.value.length > 0 || showFooterEdit.v
 
 .answerMuted {
 	opacity: 0.7;
+}
+
+/* Slack chrome carries its own paddings/typography — the row's plain answer
+   box steps back to a white Slack-like ground. */
+.answerSlack {
+	padding: var(--spacing--2xs) 0;
+	background-color: #fff;
+	border: 1px solid rgba(29, 28, 29, 0.13);
 }
 
 .noAnswer {

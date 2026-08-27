@@ -7,7 +7,7 @@
  * writes the store. Counts come from the run's page envelope, never from the
  * loaded page, so paging can't change what the header claims.
  */
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { N8nBadge, N8nButton, N8nSpinner, N8nText, N8nTooltip } from '@n8n/design-system';
 import { useToast } from '@n8n/composables/useToast';
 import { useI18n } from '@n8n/i18n';
@@ -17,6 +17,16 @@ import type { AgentEvalVote } from '../agentEvals.types';
 import { resolveReviewRowView } from '../utils/agent-eval-review';
 import { useRelativeTimestamp } from '../utils/relative-time';
 import AgentEvalResultRow from './AgentEvalResultRow.vue';
+import SurfaceDialSelector from '@/experiments/destinationPreviews/SurfaceDialSelector.vue';
+import type {
+	DestinationNotch,
+	PreviewSurface,
+} from '@/experiments/destinationPreviews/surfaceDial';
+
+// AI Trust prototype: one surface·destination control for the whole review —
+// every answer below renders in the chosen chrome.
+const reviewSurface = ref<PreviewSurface>('chat');
+const reviewNotch = ref<DestinationNotch>('simulated');
 
 const props = defineProps<{
 	projectId: string;
@@ -181,6 +191,13 @@ onBeforeUnmount(store.stopPollingRun);
 				<N8nText v-if="relativeRunTime" size="xsmall" color="text-light">
 					· {{ relativeRunTime }}
 				</N8nText>
+				<SurfaceDialSelector
+					v-model:surface="reviewSurface"
+					v-model:notch="reviewNotch"
+					:surfaces="['chat', 'slack']"
+					draft-target="#test-invoices"
+					:class="$style.dialSelector"
+				/>
 			</div>
 		</header>
 
@@ -191,6 +208,7 @@ onBeforeUnmount(store.stopPollingRun);
 			:view="viewFor(result.id)"
 			:disabled="disabled"
 			:project-id="projectId"
+			:surface="reviewSurface"
 			@vote="onVote(result.id, $event)"
 			@update:comment="store.setDraftComment(runId, result.id, $event)"
 			@update:correction="store.setDraftCorrection(runId, result.id, $event)"
@@ -288,6 +306,10 @@ onBeforeUnmount(store.stopPollingRun);
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--spacing--3xs);
+}
+
+.dialSelector {
+	margin-left: auto;
 }
 
 .loadMore {

@@ -7912,7 +7912,7 @@
 	"agents.builder.header.tab.executions": "Sessions",
 	"agents.builder.header.tab.settings": "Settings",
 	"agents.builder.header.tab.memory": "Memory",
-	"agents.builder.header.tab.agentEvals": "Evals",
+	"agents.builder.header.tab.agentEvals": "Outputs",
 	"agents.builder.header.tab.preview": "Preview",
 	"agents.builder.header.tab.raw": "Raw",
 	"agents.builder.header.workspaceCrumb": "Workspace",

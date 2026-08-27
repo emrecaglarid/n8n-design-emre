@@ -1854,7 +1854,7 @@ function onSwitchAgent(nextAgentId: string) {
 			]"
 		>
 			<div
-				v-if="!isPreviewDockOpen && !isArtifactMode && instanceAiAvailable"
+				v-if="!isDockEffectivelyOpen && !isArtifactMode && instanceAiAvailable"
 				:class="$style.aiButtonWrapper"
 			>
 				<N8nButton
