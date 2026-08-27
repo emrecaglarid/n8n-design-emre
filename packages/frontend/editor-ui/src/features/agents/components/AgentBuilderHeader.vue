@@ -16,6 +16,7 @@ import {
 	N8nDropdownMenu,
 	N8nDropdownMenuItem,
 	N8nIcon,
+	N8nTabs,
 	N8nToggle,
 	N8nTooltip,
 } from '@n8n/design-system';
@@ -29,9 +30,14 @@ import { instanceAiCreateAgentRoute } from '@/features/ai/instanceAi/createAgent
 import AgentPublishButton from './AgentPublishButton.vue';
 import AgentValidationTooltip from './AgentValidationTooltip.vue';
 import { useProjectAgentsList } from '../composables/useProjectAgentsList';
+import type { AgentBuilderMainTab } from '../composables/useAgentBuilderMainTabs';
 import type { AgentResource } from '../types';
 
 const props = defineProps<{
+	/** AI Trust prototype: the main tabs live in the header so tab content can
+	 * use the full panel below (the preview stage is edge-to-edge). */
+	mainTabOptions?: Array<{ label: string; value: AgentBuilderMainTab }>;
+	activeMainTab?: AgentBuilderMainTab;
 	agent: AgentResource | null;
 	projectId: string;
 	agentId: string;
@@ -50,6 +56,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+	'update:activeMainTab': [tab: AgentBuilderMainTab];
 	'header-action': [item: string];
 	'open-preview': [];
 	'close-preview': [];
@@ -185,6 +192,15 @@ const isVersionHistoryDisabled = computed(() => !props.agent?.hasPublishHistory)
 				</template>
 			</N8nBreadcrumbs>
 		</div>
+		<div v-if="mainTabOptions && mainTabOptions.length > 0" :class="$style.center">
+			<N8nTabs
+				:model-value="activeMainTab"
+				:options="mainTabOptions"
+				:class="$style.mainTabs"
+				data-testid="agent-header-tabs"
+				@update:model-value="emit('update:activeMainTab', $event as AgentBuilderMainTab)"
+			/>
+		</div>
 		<div :class="$style.right">
 			<span
 				v-if="saveStatus === 'saving' || saveStatus === 'saved'"
@@ -302,6 +318,21 @@ const isVersionHistoryDisabled = computed(() => !props.agent?.hasPublishHistory)
 	margin-inline: var(--spacing--4xs);
 	user-select: none;
 	font-size: var(--font-size--xl);
+}
+
+.center {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+}
+
+/* The tabs sit in the header row, so the panel underline the tab component
+   ships with would read as a stray rule — the header's own border is enough. */
+.mainTabs {
+	border-bottom: none;
 }
 
 .switcherButton {

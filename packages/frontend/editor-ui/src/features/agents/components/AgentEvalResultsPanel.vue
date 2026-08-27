@@ -17,16 +17,18 @@ import type { AgentEvalVote } from '../agentEvals.types';
 import { resolveReviewRowView } from '../utils/agent-eval-review';
 import { useRelativeTimestamp } from '../utils/relative-time';
 import AgentEvalResultRow from './AgentEvalResultRow.vue';
-import SurfaceDialSelector from '@/experiments/destinationPreviews/SurfaceDialSelector.vue';
+import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
 import type {
-	DestinationNotch,
+	PreviewDestination,
 	PreviewSurface,
 } from '@/experiments/destinationPreviews/surfaceDial';
 
-// AI Trust prototype: one surface·destination control for the whole review —
-// every answer below renders in the chosen chrome.
-const reviewSurface = ref<PreviewSurface>('chat');
-const reviewNotch = ref<DestinationNotch>('simulated');
+// AI Trust prototype: one destination control for the whole review. Picking a
+// test channel renders every answer below in that channel's chrome.
+const reviewDestination = ref<PreviewDestination>({ kind: 'preview' });
+const reviewSurface = computed<PreviewSurface>(() =>
+	reviewDestination.value.kind === 'test' ? 'slack' : 'chat',
+);
 
 const props = defineProps<{
 	projectId: string;
@@ -191,13 +193,7 @@ onBeforeUnmount(store.stopPollingRun);
 				<N8nText v-if="relativeRunTime" size="xsmall" color="text-light">
 					· {{ relativeRunTime }}
 				</N8nText>
-				<SurfaceDialSelector
-					v-model:surface="reviewSurface"
-					v-model:notch="reviewNotch"
-					:surfaces="['chat', 'slack']"
-					draft-target="#test-invoices"
-					:class="$style.dialSelector"
-				/>
+				<DestinationDropdown v-model="reviewDestination" :class="$style.dialSelector" />
 			</div>
 		</header>
 

@@ -8,12 +8,8 @@ import { useAgentChatStream } from '@/features/agents/composables/useAgentChatSt
 import { isDataTableDataset, toCaseSource } from '@/features/agents/utils/agentEvalCases.utils';
 import SlackWindow from '@/experiments/destinationPreviews/slack/SlackWindow.vue';
 import SlackMessage from '@/experiments/destinationPreviews/slack/SlackMessage.vue';
-import PlainChatWindow from '@/experiments/destinationPreviews/chat/PlainChatWindow.vue';
-import SurfaceDialSelector from '@/experiments/destinationPreviews/SurfaceDialSelector.vue';
-import type {
-	DestinationNotch,
-	PreviewSurface,
-} from '@/experiments/destinationPreviews/surfaceDial';
+import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
+import type { PreviewDestination } from '@/experiments/destinationPreviews/surfaceDial';
 import { useAgentCrewStore } from '@/experiments/agentCrew/agentCrew.store';
 
 /**
@@ -58,23 +54,16 @@ const chat = useAgentChatStream({
 
 const agentDisplayName = computed(() => props.agentName?.trim() || 'Your agent');
 
-// ── Surface & destination: which chrome renders the session, and how real
-//    the destination is. Draft swaps the channel for the defused one. ─────────
-const surface = ref<PreviewSurface>('slack');
-const notch = ref<DestinationNotch>('simulated');
-const channelName = computed(() => (notch.value === 'draft' ? 'test-invoices' : 'client-requests'));
-const simulatedLabel = computed(() =>
-	notch.value === 'draft'
-		? 'Draft → #test-invoices — visible to your testers, nothing external'
-		: 'Simulated preview — nothing sent',
+// ── Destination: where this session's outputs live. Preview sends nothing;
+//    a test destination swaps the window to that defused channel. ────────────
+const destination = ref<PreviewDestination>({ kind: 'preview' });
+const channelName = computed(() =>
+	destination.value.kind === 'test' ? destination.value.channel : 'client-requests',
 );
 
 // ── Tester probes staged from the crew panel ─────────────────────────────────
 const crew = useAgentCrewStore();
 const stagedFinding = computed(() => crew.getStagedFinding(props.agentId));
-function dismissStagedFinding() {
-	crew.stageFinding(props.agentId, null);
-}
 
 const displayMessages = computed(() =>
 	chat.messages.value.filter((message) => {
@@ -84,16 +73,6 @@ const displayMessages = computed(() =>
 		// bubble only while it is actively streaming (it renders as typing dots).
 		return Boolean(message.content) || message.status === 'streaming';
 	}),
-);
-
-const plainChatMessages = computed(() =>
-	displayMessages.value.map((message) => ({
-		id: message.id,
-		role: message.role as 'user' | 'assistant',
-		content: message.content,
-		pending: message.status === 'streaming' && !message.content,
-		error: message.status === 'error',
-	})),
 );
 
 // ── Suggestion chips: drafted requests from the eval machinery, shown as
@@ -275,34 +254,15 @@ onMounted(() => {
 		</template>
 
 		<template v-else>
-			<SurfaceDialSelector
-				v-model:surface="surface"
-				v-model:notch="notch"
-				:surfaces="['slack', 'chat']"
-				draft-target="#test-invoices"
-				dark
-			/>
-
-			<div
-				v-if="stagedFinding"
-				:class="$style.stagedBanner"
-				data-testid="agent-preview-staged-banner"
-			>
-				<span
-					>Tester's probe — a simulated user, separate from your conversation. Nothing was
-					sent.</span
-				>
-				<button :class="$style.stagedDismiss" @click="dismissStagedFinding">
-					Back to your session ✕
-				</button>
+			<div :class="$style.stageToolbar">
+				<DestinationDropdown v-model="destination" dark />
 			</div>
 
 			<div ref="windowWrapper" :class="$style.windowWrapper">
 				<SlackWindow
-					v-if="surface === 'slack'"
 					v-model="draft"
 					:channel-name="channelName"
-					:simulated-label="simulatedLabel"
+					simulated-label=""
 					interactive
 					:send-disabled="chat.isStreaming.value || disabled || Boolean(stagedFinding)"
 					@send="onSendDraft"
@@ -363,37 +323,6 @@ onMounted(() => {
 						</div>
 					</template>
 				</SlackWindow>
-
-				<PlainChatWindow
-					v-else
-					v-model="draft"
-					:title="`${agentDisplayName} · website chat`"
-					:simulated-label="simulatedLabel"
-					:send-disabled="chat.isStreaming.value || disabled || Boolean(stagedFinding)"
-					:messages="
-						stagedFinding
-							? [
-									{ id: 'probe-in', role: 'user' as const, content: stagedFinding.input },
-									{ id: 'probe-out', role: 'assistant' as const, content: stagedFinding.reply },
-								]
-							: plainChatMessages
-					"
-					@send="onSendDraft"
-				>
-					<template #beforeComposer>
-						<div v-if="chipCases.length > 0" :class="$style.chipRow">
-							<button
-								v-for="chip in chipCases"
-								:key="chip.rowId"
-								:class="$style.chip"
-								:disabled="chat.isStreaming.value || disabled"
-								@click="sendText(chip.input, chip.rowId)"
-							>
-								{{ chip.input }}
-							</button>
-						</div>
-					</template>
-				</PlainChatWindow>
 			</div>
 
 			<div :class="$style.stageControls">
@@ -495,33 +424,12 @@ onMounted(() => {
 	min-height: 0;
 }
 
-.stagedBanner {
+.stageToolbar {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
+	justify-content: flex-start;
 	width: 100%;
 	max-width: 680px;
-	padding: 7px 12px;
-	border-radius: var(--radius--md);
-	background: rgba(60, 140, 105, 0.22);
-	border: 1px dashed rgba(160, 220, 190, 0.55);
-	font-size: var(--font-size--3xs);
-	color: rgba(255, 255, 255, 0.85);
-}
-
-.stagedDismiss {
-	flex-shrink: 0;
-	background: transparent;
-	border: none;
-	font-size: var(--font-size--3xs);
-	color: rgba(255, 255, 255, 0.85);
-	cursor: pointer;
-	text-decoration: underline;
-
-	&:hover {
-		color: #fff;
-	}
 }
 
 .stagedCheckNote {

@@ -1820,6 +1820,8 @@ function onSwitchAgent(nextAgentId: string) {
 		/>
 		<AgentBuilderHeader
 			v-else
+			v-model:active-main-tab="activeMainTab"
+			:main-tab-options="visibleMainTabOptions"
 			:agent="agent"
 			:project-id="projectId"
 			:agent-id="agentId"
@@ -1912,7 +1914,6 @@ function onSwitchAgent(nextAgentId: string) {
 					:can-execute-agent="canExecuteAgent"
 					:agent-available-in-mcp="agentAvailableInMcp"
 					:tasks-reload-key="tasksReloadKey"
-					:main-tab-options="visibleMainTabOptions"
 					:agent-unsaved="isUnsaved"
 					:ensure-agent-persisted="ensureAgentPersisted"
 					:executions-description="executionsDescription"

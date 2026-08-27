@@ -7,8 +7,8 @@ import { GOOGLE_GMAIL_NODE_TYPE } from '@/app/constants/nodeTypes';
 import type { SimulatedPreview, PreviewVerdict } from '../simulatedOutputPreview.store';
 import SlackMessagePreview from './SlackMessagePreview.vue';
 import EmailPreview from './EmailPreview.vue';
-import SurfaceDialSelector from '@/experiments/destinationPreviews/SurfaceDialSelector.vue';
-import type { DestinationNotch } from '@/experiments/destinationPreviews/surfaceDial';
+import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
+import type { PreviewDestination } from '@/experiments/destinationPreviews/surfaceDial';
 
 const props = defineProps<{
 	preview: SimulatedPreview;
@@ -27,15 +27,11 @@ const title = computed(() => {
 	return props.preview.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Gmail' : 'Email';
 });
 
-// The surface is fixed by the destination node; only the notch moves. The
-// draft target follows the surface so the honesty text stays plausible.
-const surface = computed(() => props.preview.kind);
-const notch = ref<DestinationNotch>('simulated');
-const draftTarget = computed(() =>
-	props.preview.kind === 'slack' ? '#test-invoices' : 'a draft in your own inbox',
-);
+// The rendering surface is fixed by the destination node; the dropdown only
+// moves where the output would land.
+const destination = ref<PreviewDestination>({ kind: 'preview' });
 const honestyChip = computed(() =>
-	notch.value === 'draft' ? 'Draft — nothing external' : 'Preview only',
+	destination.value.kind === 'test' ? 'Draft — nothing external' : 'Preview only',
 );
 </script>
 
@@ -69,13 +65,7 @@ const honestyChip = computed(() =>
 			/>
 		</div>
 		<div :class="$style.footer">
-			<SurfaceDialSelector
-				v-model:notch="notch"
-				:surface="surface"
-				:surfaces="[surface]"
-				:draft-target="draftTarget"
-				:class="$style.dialSelector"
-			/>
+			<DestinationDropdown v-model="destination" :class="$style.dialSelector" />
 			<button
 				:class="$style.thumbsDownButton"
 				title="Not right"

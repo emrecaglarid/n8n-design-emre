@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { N8nCard, N8nTabs } from '@n8n/design-system';
+import { N8nCard } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
 import type { AgentConfigValidationIssue, AgentFileDto } from '@n8n/api-types';
 
@@ -30,7 +30,6 @@ import AgentPreviewStage from '@/experiments/agentPreviewStage/AgentPreviewStage
 
 const props = defineProps<{
 	activeMainTab: AgentBuilderMainTab;
-	mainTabOptions: Array<{ label: string; value: AgentBuilderMainTab }>;
 	localConfig: AgentJsonConfig | null;
 	agent: AgentResource | null;
 	projectId: string;
@@ -96,17 +95,6 @@ const i18n = useI18n();
 		data-testid="agent-builder-editor-column"
 	>
 		<div :class="$style.panelArea">
-			<div :class="$style.tabsRow" data-testid="agent-tabs-row">
-				<div :class="$style.tabsRule" data-testid="agent-tabs-rule">
-					<N8nTabs
-						:model-value="activeMainTab"
-						:options="mainTabOptions"
-						:class="$style.mainTabs"
-						data-testid="agent-header-tabs"
-						@update:model-value="emit('update:activeMainTab', $event)"
-					/>
-				</div>
-			</div>
 			<div
 				v-if="activeMainTab !== 'preview'"
 				:class="$style.identityHeaderRow"
@@ -381,29 +369,5 @@ const i18n = useI18n();
 	max-width: var(--agent-builder-content-max-width);
 	margin: 0 auto;
 	padding: var(--spacing--2xl) var(--agent-builder-content-padding-inline) var(--spacing--xl);
-}
-
-.tabsRow {
-	flex-shrink: 0;
-	display: flex;
-	align-items: center;
-	width: 100%;
-}
-
-.tabsRule {
-	box-sizing: border-box;
-	width: 100%;
-	max-width: var(--agent-builder-content-max-width);
-	margin: 0 auto;
-	padding: 0 var(--agent-builder-content-padding-inline);
-}
-
-.mainTabs {
-	width: 100%;
-	border-bottom: var(--border);
-
-	:global([data-test-id='tab-agent'] > *) {
-		padding-left: 0;
-	}
 }
 </style>

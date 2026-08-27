@@ -62,7 +62,7 @@ onBeforeUnmount(() => observer?.disconnect());
 				<span :class="[$style.light, $style.yellow]" />
 				<span :class="[$style.light, $style.green]" />
 			</div>
-			<span :class="$style.simulated">
+			<span v-if="simulatedLabel" :class="$style.simulated">
 				<svg
 					width="11"
 					height="11"

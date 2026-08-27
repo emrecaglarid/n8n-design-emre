@@ -68,6 +68,12 @@ export const CREW_CATALOGUE: CrewMember[] = [
 	},
 ];
 
+export interface TesterSuggestion {
+	rowId: number;
+	input: string;
+	whatToCheck: string;
+}
+
 interface AgentCrewState {
 	activeMemberIds: string[];
 	findings: TesterFinding[];
@@ -75,6 +81,10 @@ interface AgentCrewState {
 	stagedFindingId: string | null;
 	/** rowIds of cases the tester already tried, so reruns pick fresh ones */
 	probedRowIds: number[];
+	/** The Tester introduced itself and offered things to try */
+	greetingShown: boolean;
+	suggestions: TesterSuggestion[];
+	loadingSuggestions: boolean;
 }
 
 function emptyState(): AgentCrewState {
@@ -84,6 +94,9 @@ function emptyState(): AgentCrewState {
 		testerStatus: 'idle',
 		stagedFindingId: null,
 		probedRowIds: [],
+		greetingShown: false,
+		suggestions: [],
+		loadingSuggestions: false,
 	};
 }
 
@@ -130,15 +143,16 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		stateFor(agentId).stagedFindingId = findingId;
 	}
 
-	/**
-	 * The live tester run: make sure drafted requests exist, pick up to `count`
-	 * fresh ones, and send each through its own throwaway chat session. The
-	 * reply text becomes the finding the Tester reports back.
-	 */
-	async function runTester(projectId: string, agentId: string, count = 2): Promise<void> {
+	const getGreetingShown = computed(() => (agentId: string) => stateFor(agentId).greetingShown);
+	const getSuggestions = computed(() => (agentId: string) => stateFor(agentId).suggestions);
+	const getLoadingSuggestions = computed(
+		() => (agentId: string) => stateFor(agentId).loadingSuggestions,
+	);
+
+	/** Drafted requests the Tester can offer, freshest first, already-tried excluded. */
+	async function loadSuggestions(projectId: string, agentId: string): Promise<void> {
 		const state = stateFor(agentId);
-		if (state.testerStatus === 'probing') return;
-		state.testerStatus = 'probing';
+		state.loadingSuggestions = true;
 		try {
 			await evals.fetchDatasets(projectId, agentId);
 			let dataset = evals.getDatasets(agentId)[0];
@@ -149,6 +163,7 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 			}
 			if (!dataset || !isDataTableDataset(dataset)) return;
 			const source = toCaseSource(dataset);
+			if (!source) return;
 			await evals.fetchCases(projectId, source);
 			let cases = evals
 				.getCases(dataset.id)
@@ -160,35 +175,62 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 					.getCases(dataset.id)
 					.filter((candidate) => !state.probedRowIds.includes(candidate.rowId));
 			}
+			state.suggestions = cases.slice(0, 3).map((evalCase) => ({
+				rowId: evalCase.rowId,
+				input: evalCase.input,
+				whatToCheck: evalCase.whatToCheck ?? '',
+			}));
+		} finally {
+			state.loadingSuggestions = false;
+		}
+	}
 
-			for (const evalCase of cases.slice(0, count)) {
-				state.probedRowIds.push(evalCase.rowId);
-				const finding = reactive<TesterFinding>({
-					id: crypto.randomUUID(),
-					input: evalCase.input,
-					reply: '',
-					whatToCheck: evalCase.whatToCheck ?? '',
-					status: 'probing',
-				});
-				state.findings.push(finding);
-				try {
-					// A throwaway session per probe: the tester never touches the
-					// builder's own preview conversation.
-					const chat = useAgentChatStream({
-						projectId: ref(projectId),
-						agentId: ref(agentId),
-						continueSessionId: ref(crypto.randomUUID()),
-					});
-					await chat.sendMessage(evalCase.input);
-					const reply = [...chat.messages.value]
-						.reverse()
-						.find((message) => message.role === 'assistant' && message.content);
-					finding.reply = reply?.content ?? '';
-					finding.status = reply && reply.status !== 'error' ? 'done' : 'error';
-				} catch {
-					finding.status = 'error';
-				}
-			}
+	/** Clicking the Tester's avatar: it says hello and offers things to try. */
+	async function showTesterGreeting(projectId: string, agentId: string): Promise<void> {
+		const state = stateFor(agentId);
+		state.greetingShown = true;
+		if (state.suggestions.length === 0 && !state.loadingSuggestions) {
+			await loadSuggestions(projectId, agentId);
+		}
+	}
+
+	/**
+	 * One live probe: the suggestion goes through a throwaway chat session (the
+	 * tester never touches the builder's own preview conversation) and the reply
+	 * comes back as a finding.
+	 */
+	async function probeSuggestion(
+		projectId: string,
+		agentId: string,
+		suggestion: TesterSuggestion,
+	): Promise<void> {
+		const state = stateFor(agentId);
+		if (state.probedRowIds.includes(suggestion.rowId)) return;
+		state.probedRowIds.push(suggestion.rowId);
+		state.suggestions = state.suggestions.filter((entry) => entry.rowId !== suggestion.rowId);
+		state.testerStatus = 'probing';
+		const finding = reactive<TesterFinding>({
+			id: crypto.randomUUID(),
+			input: suggestion.input,
+			reply: '',
+			whatToCheck: suggestion.whatToCheck,
+			status: 'probing',
+		});
+		state.findings.push(finding);
+		try {
+			const chat = useAgentChatStream({
+				projectId: ref(projectId),
+				agentId: ref(agentId),
+				continueSessionId: ref(crypto.randomUUID()),
+			});
+			await chat.sendMessage(suggestion.input);
+			const reply = [...chat.messages.value]
+				.reverse()
+				.find((message) => message.role === 'assistant' && message.content);
+			finding.reply = reply?.content ?? '';
+			finding.status = reply && reply.status !== 'error' ? 'done' : 'error';
+		} catch {
+			finding.status = 'error';
 		} finally {
 			state.testerStatus = 'idle';
 		}
@@ -203,6 +245,10 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		getTesterStatus,
 		getStagedFinding,
 		stageFinding,
-		runTester,
+		getGreetingShown,
+		getSuggestions,
+		getLoadingSuggestions,
+		showTesterGreeting,
+		probeSuggestion,
 	};
 });
