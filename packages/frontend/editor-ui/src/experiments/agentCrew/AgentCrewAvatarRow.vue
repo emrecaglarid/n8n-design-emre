@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue';
 import { N8nTooltip } from '@n8n/design-system';
 
+import { useAgentEvalsStore } from '@/features/agents/agentEvals.store';
+
 import { useAgentCrewStore, type CrewMember } from './agentCrew.store';
 
 /**
@@ -18,13 +20,25 @@ const props = defineProps<{
 }>();
 
 const crew = useAgentCrewStore();
+const evalsStore = useAgentEvalsStore();
 
 // The Tester only takes its seat once the agent exists — there is nothing to
-// try before that.
+// try before that. When it joins right after a build we watched happen, it
+// greets with things to try and the artifact lands on the Preview tab.
+// Opening an already-built agent seats it quietly instead.
+let sawBuildInProgress = false;
 watch(
 	() => [props.agentId, props.agentPending] as const,
 	([agentId, pending]) => {
-		if (agentId && pending === false) crew.ensureTester(agentId);
+		if (pending) {
+			sawBuildInProgress = true;
+			return;
+		}
+		if (!agentId || pending !== false) return;
+		if (crew.ensureTester(agentId) && sawBuildInProgress) {
+			void crew.showTesterGreeting(props.projectId, agentId);
+			evalsStore.requestEvalsFocus(agentId);
+		}
 	},
 	{ immediate: true },
 );

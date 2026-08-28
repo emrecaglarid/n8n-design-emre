@@ -1165,6 +1165,7 @@ async function dismissComposerContextChip() {
 										v-for="message in displayedMessages"
 										:key="message.id"
 										:message="message"
+										:crew-author="isAgentEvalsEnabled && !!preview.activeAgentId.value"
 									/>
 								</TransitionGroup>
 								<!-- Builder sub-agents are extracted from their parent assistant
@@ -1195,8 +1196,12 @@ async function dismissComposerContextChip() {
 								</Transition>
 
 								<Transition name="confirmation-slide">
+									<!-- AI Trust prototype: superseded by the Tester joining the crew
+									     with suggestions — the offer card stays off when the crew is on. -->
 									<InstanceAiTestAgentPanel
-										v-if="activeTestAgentOffer"
+										v-if="
+											activeTestAgentOffer && !(isAgentEvalsEnabled && preview.activeAgentId.value)
+										"
 										@generate="handleGenerateTestCasesFromOffer"
 										@dismiss="dismissTestAgentOffer"
 									/>

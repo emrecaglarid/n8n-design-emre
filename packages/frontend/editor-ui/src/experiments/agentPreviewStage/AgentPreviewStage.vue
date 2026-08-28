@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { N8nText } from '@n8n/design-system';
 import { useToast } from '@n8n/composables/useToast';
 
@@ -65,10 +65,17 @@ const channelName = computed(() =>
 // ── Audience: who can see this preview. Visual state only. ──────────────────
 const audience = ref<'you' | 'team'>('you');
 
-// ── Tester probes and fix replays staged from the crew panel ─────────────────
+// ── Tester sends: the crew queues requests here and this session runs them,
+//    so everything the Tester does lands in the one preview conversation. ─────
 const crew = useAgentCrewStore();
-const stagedFinding = computed(() => crew.getStagedFinding(props.agentId));
-const stagedProposal = computed(() => crew.getStagedProposal(props.agentId));
+const pendingSends = computed(() => crew.getPendingSends(props.agentId));
+
+/** Requests the Tester sent in this conversation, to attribute their bubbles */
+const testerInputs = ref<Set<string>>(new Set());
+
+function isTesterMessage(message: { role: string; content: string }): boolean {
+	return message.role === 'user' && testerInputs.value.has(message.content.trim());
+}
 
 const displayMessages = computed(() =>
 	chat.messages.value.filter((message) => {
@@ -147,6 +154,47 @@ function onSendDraft() {
 	void sendText(draft.value);
 }
 
+// ── Draining the Tester's queued requests through this same session ─────────
+let draining = false;
+
+async function drainStageSends() {
+	if (draining || chat.isStreaming.value || props.disabled) return;
+	const send = crew.takeStageSend(props.agentId);
+	if (!send) return;
+	draining = true;
+	const trimmed = send.input.trim();
+	testerInputs.value = new Set([...testerInputs.value, trimmed]);
+	if (send.rowId !== undefined) {
+		usedChipRowIds.value = new Set([...usedChipRowIds.value, send.rowId]);
+	}
+	votedVote.value = null;
+	showReason.value = false;
+	reasonText.value = '';
+	lastExchange.value = { text: trimmed, rowId: send.rowId };
+	try {
+		await chat.sendMessage(trimmed);
+		const reply = [...chat.messages.value]
+			.reverse()
+			.find((message) => message.role === 'assistant' && message.content);
+		crew.resolveStageSend(
+			props.agentId,
+			send,
+			reply && reply.status !== 'error' ? reply.content : '',
+		);
+	} catch {
+		crew.resolveStageSend(props.agentId, send, '');
+	} finally {
+		draining = false;
+		void drainStageSends();
+	}
+}
+
+watch(
+	() => [pendingSends.value.length, chat.isStreaming.value],
+	() => void drainStageSends(),
+	{ immediate: true },
+);
+
 // ── Judging: quiet capture into the case set ────────────────────────────────
 const canJudge = computed(() => {
 	const messages = displayMessages.value;
@@ -195,11 +243,6 @@ function cancelReason() {
 	showReason.value = false;
 	reasonText.value = '';
 	votedVote.value = null;
-}
-
-/** The replay looked right: unstage it and get back to the session. */
-function onKeepFix() {
-	crew.stageProposal(props.agentId, null);
 }
 
 async function captureExchange(whatToCheck: string) {
@@ -299,62 +342,25 @@ onMounted(() => {
 					<SlackMessage
 						v-for="message in displayMessages"
 						:key="message.id"
-						:author-name="message.role === 'user' ? 'You' : agentDisplayName"
+						:author-name="
+							message.role === 'user'
+								? isTesterMessage(message)
+									? 'Tester'
+									: 'You'
+								: agentDisplayName
+						"
 						:text="message.content"
 						:app-badge="message.role === 'assistant'"
-						:avatar-color="message.role === 'assistant' ? '#E8912D' : '#4A7DAB'"
+						:avatar-color="
+							message.role === 'assistant'
+								? '#E8912D'
+								: isTesterMessage(message)
+									? '#3C8C69'
+									: '#4A7DAB'
+						"
 						:pending="message.status === 'streaming' && !message.content"
 						:error="message.status === 'error'"
 					/>
-
-					<template v-if="stagedFinding">
-						<div :class="$style.threadDivider">
-							<span :class="$style.dividerLine" />
-							<span :class="$style.dividerLabel">Tester's probe · separate session</span>
-							<span :class="$style.dividerLine" />
-						</div>
-						<SlackMessage
-							author-name="Tester · simulated user"
-							:text="stagedFinding.input"
-							avatar-color="#3C8C69"
-						/>
-						<SlackMessage
-							:author-name="agentDisplayName"
-							:text="stagedFinding.reply"
-							app-badge
-							avatar-color="#E8912D"
-						/>
-						<div v-if="stagedFinding.whatToCheck" :class="$style.stagedCheckNote">
-							The Tester's question: {{ stagedFinding.whatToCheck }}
-						</div>
-					</template>
-
-					<template v-if="stagedProposal">
-						<div :class="$style.threadDivider">
-							<span :class="$style.dividerLine" />
-							<span :class="$style.dividerLabel">Before the fix</span>
-							<span :class="$style.dividerLine" />
-						</div>
-						<div :class="$style.dimmed">
-							<SlackMessage
-								:author-name="agentDisplayName"
-								:text="stagedProposal.beforeReply"
-								app-badge
-								avatar-color="#E8912D"
-							/>
-						</div>
-						<div :class="$style.threadDivider">
-							<span :class="$style.dividerLine" />
-							<span :class="$style.dividerLabel">Same request, replayed after the fix</span>
-							<span :class="$style.dividerLine" />
-						</div>
-						<SlackMessage
-							:author-name="agentDisplayName"
-							:text="stagedProposal.afterReply"
-							app-badge
-							avatar-color="#E8912D"
-						/>
-					</template>
 					<template #beforeComposer>
 						<div v-if="chipCases.length > 0 || cases.length === 0" :class="$style.chipRow">
 							<button
@@ -409,9 +415,9 @@ onMounted(() => {
 					</button>
 					<button
 						:class="[$style.looksGoodButton, votedVote === 'up' && $style.looksGoodSelected]"
-						:disabled="stagedProposal ? false : !canJudge"
+						:disabled="!canJudge"
 						data-testid="agent-preview-vote-up"
-						@click="stagedProposal ? onKeepFix() : onVote('up')"
+						@click="onVote('up')"
 					>
 						<svg
 							width="17"
@@ -428,7 +434,7 @@ onMounted(() => {
 								d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"
 							/>
 						</svg>
-						{{ stagedProposal ? 'Fixed — keep it' : 'Looks good' }}
+						Looks good
 					</button>
 				</div>
 			</div>
@@ -487,40 +493,6 @@ onMounted(() => {
 	gap: 10px;
 	width: 100%;
 	max-width: 680px;
-}
-
-.threadDivider {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 4px 20px;
-}
-
-.dividerLine {
-	flex: 1;
-	height: 1px;
-	background: rgba(29, 28, 29, 0.13);
-}
-
-.dividerLabel {
-	flex-shrink: 0;
-	font-size: 11px;
-	color: #616061;
-}
-
-.dimmed {
-	opacity: 0.6;
-}
-
-.stagedCheckNote {
-	margin: 4px 20px 0;
-	padding: 6px 10px;
-	border-radius: var(--radius);
-	background: rgba(60, 140, 105, 0.12);
-	border: 1px dashed rgba(60, 140, 105, 0.5);
-	font-size: 12px;
-	color: #2c6e50;
-	text-wrap: pretty;
 }
 
 .channelIntro {

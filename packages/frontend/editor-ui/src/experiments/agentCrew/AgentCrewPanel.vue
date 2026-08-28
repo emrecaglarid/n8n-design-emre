@@ -6,8 +6,9 @@ import { useAgentCrewStore } from './agentCrew.store';
 /**
  * AI Trust prototype: the crew's side of the builder conversation, rendered as
  * chat above the composer — the Tester's greeting and findings, your verdicts
- * arriving from the stage, the Builder's proposed instruction fixes, and
- * system lines when someone joins. No panel chrome: participants, not widgets.
+ * arriving from the preview, the Builder's proposed instruction fixes, and
+ * system lines when someone joins. Everything the Tester actually does happens
+ * in the preview conversation; this feed just narrates it.
  */
 const props = defineProps<{
 	projectId: string;
@@ -16,32 +17,21 @@ const props = defineProps<{
 
 const crew = useAgentCrewStore();
 
-const greetingShown = computed(() => crew.getGreetingShown(props.agentId));
 const suggestions = computed(() => crew.getSuggestions(props.agentId));
 const loadingSuggestions = computed(() => crew.getLoadingSuggestions(props.agentId));
 const feed = computed(() => crew.getFeed(props.agentId));
 const probing = computed(() => crew.getTesterStatus(props.agentId) === 'probing');
-const stagedFindingId = computed(() => crew.getStagedFinding(props.agentId)?.id ?? null);
-const stagedProposalId = computed(() => crew.getStagedProposal(props.agentId)?.id ?? null);
 
 // One suggestion at a time: trying something shouldn't feel like setting up a
 // suite. The next one appears once this one has been tried.
 const nextSuggestion = computed(() => suggestions.value[0] ?? null);
 
-const visible = computed(() => greetingShown.value || feed.value.length > 0);
+const visible = computed(() => feed.value.length > 0);
 
 function onSuggestionClick() {
 	const suggestion = nextSuggestion.value;
 	if (!suggestion || probing.value) return;
-	void crew.probeSuggestion(props.projectId, props.agentId, suggestion);
-}
-
-function onToggleFindingStage(findingId: string) {
-	crew.stageFinding(props.agentId, stagedFindingId.value === findingId ? null : findingId);
-}
-
-function onToggleProposalStage(proposalId: string) {
-	crew.stageProposal(props.agentId, stagedProposalId.value === proposalId ? null : proposalId);
+	crew.requestProbe(props.agentId, suggestion);
 }
 
 function onApply(proposalId: string) {
@@ -56,29 +46,29 @@ function truncate(text: string, max = 140): string {
 
 <template>
 	<div v-if="visible" :class="$style.feed" data-testid="agent-crew-panel">
-		<div v-if="greetingShown" :class="$style.message">
-			<span :class="[$style.avatar, $style.testerAvatar]">T</span>
-			<span :class="$style.body">
-				<span :class="[$style.author, $style.testerAuthor]">Tester</span>
-				<span :class="$style.text"
-					>Hey! I can try things on this agent while you build. Tell me to test it, or start with
-					this:</span
-				>
-				<span v-if="loadingSuggestions" :class="$style.text">Thinking of things to try…</span>
-				<button
-					v-else-if="nextSuggestion"
-					:class="$style.chip"
-					:disabled="probing"
-					data-testid="agent-crew-suggestion"
-					@click="onSuggestionClick"
-				>
-					{{ truncate(nextSuggestion.input, 90) }}
-				</button>
-			</span>
-		</div>
-
 		<template v-for="item in feed" :key="item.id">
 			<div v-if="item.kind === 'system'" :class="$style.systemLine">{{ item.text }}</div>
+
+			<div v-else-if="item.kind === 'greeting'" :class="$style.message">
+				<span :class="[$style.avatar, $style.testerAvatar]">T</span>
+				<span :class="$style.body">
+					<span :class="[$style.author, $style.testerAuthor]">Tester</span>
+					<span :class="$style.text"
+						>Hey! I can try things on this agent while you build. Tell me to test it, or start with
+						this:</span
+					>
+					<span v-if="loadingSuggestions" :class="$style.text">Thinking of things to try…</span>
+					<button
+						v-else-if="nextSuggestion"
+						:class="$style.chip"
+						:disabled="probing"
+						data-testid="agent-crew-suggestion"
+						@click="onSuggestionClick"
+					>
+						{{ truncate(nextSuggestion.input, 90) }}
+					</button>
+				</span>
+			</div>
 
 			<div v-else-if="item.kind === 'verdict'" :class="$style.verdictWrap">
 				<span :class="$style.verdictBubble">👎 {{ item.text }}</span>
@@ -89,7 +79,9 @@ function truncate(text: string, max = 140): string {
 				<span :class="$style.body">
 					<span :class="[$style.author, $style.testerAuthor]">Tester</span>
 					<template v-if="item.finding.status === 'probing'">
-						<span :class="$style.text">Trying: “{{ truncate(item.finding.input, 90) }}”…</span>
+						<span :class="$style.text"
+							>Trying “{{ truncate(item.finding.input, 90) }}” in the preview…</span
+						>
 					</template>
 					<template v-else-if="item.finding.status === 'error'">
 						<span :class="$style.text"
@@ -98,21 +90,9 @@ function truncate(text: string, max = 140): string {
 					</template>
 					<template v-else>
 						<span :class="$style.text">
-							I asked: “{{ truncate(item.finding.input, 110) }}” — it replied: “{{
-								truncate(item.finding.reply, 140)
-							}}”.
-							<template v-if="item.finding.whatToCheck"
-								>I'd look at: {{ item.finding.whatToCheck }}.</template
-							>
-							Does this look right to you?
+							I asked “{{ truncate(item.finding.input, 110) }}” — the reply is in the preview. Does
+							it look right to you?
 						</span>
-						<button :class="$style.stageLink" @click="onToggleFindingStage(item.finding.id)">
-							{{
-								stagedFindingId === item.finding.id
-									? 'Hide from the stage'
-									: 'Show me on the stage →'
-							}}
-						</button>
 					</template>
 				</span>
 			</div>
@@ -147,23 +127,15 @@ function truncate(text: string, max = 140): string {
 							>Updating the instructions…</span
 						>
 						<span v-else-if="item.proposal.status === 'replaying'" :class="$style.diffStatus"
-							>Replaying the same request…</span
+							>Replaying the same request in the preview…</span
+						>
+						<span v-else-if="item.proposal.status === 'done'" :class="$style.diffStatus"
+							>Applied — the replay is in the preview.</span
 						>
 						<span v-else-if="item.proposal.status === 'error'" :class="$style.diffStatus"
 							>The replay didn't come back — the instruction change is saved.</span
 						>
 					</span>
-					<button
-						v-if="item.proposal.status === 'done'"
-						:class="$style.stageLink"
-						@click="onToggleProposalStage(item.proposal.id)"
-					>
-						{{
-							stagedProposalId === item.proposal.id
-								? 'Hide from the stage'
-								: 'Before and after are on the stage →'
-						}}
-					</button>
 				</span>
 			</div>
 		</template>
@@ -226,10 +198,11 @@ function truncate(text: string, max = 140): string {
 	color: var(--color--primary);
 }
 
+/* Matches the builder thread's message text (N8nText size="large") */
 .text {
-	font-size: var(--font-size--sm);
+	font-size: var(--font-size--md);
 	color: var(--color--text);
-	line-height: 1.45;
+	line-height: var(--line-height--xl);
 	text-wrap: pretty;
 	overflow-wrap: anywhere;
 }
@@ -255,9 +228,9 @@ function truncate(text: string, max = 140): string {
 	background: var(--color--background);
 	border-radius: var(--radius--lg);
 	padding: 8px 12px;
-	font-size: var(--font-size--sm);
+	font-size: var(--font-size--md);
 	color: var(--color--text);
-	line-height: 1.4;
+	line-height: var(--line-height--xl);
 	overflow-wrap: anywhere;
 }
 
@@ -288,21 +261,6 @@ function truncate(text: string, max = 140): string {
 	&:disabled {
 		opacity: 0.5;
 		cursor: default;
-	}
-}
-
-.stageLink {
-	align-self: flex-start;
-	background: transparent;
-	border: none;
-	padding: 0;
-	font-size: var(--font-size--2xs);
-	color: var(--color--text--tint-1);
-	text-decoration: underline;
-	cursor: pointer;
-
-	&:hover {
-		color: var(--color--text);
 	}
 }
 

@@ -21,6 +21,11 @@ import InstanceAiMarkdown from './InstanceAiMarkdown.vue';
 
 const props = defineProps<{
 	message: InstanceAiMessage;
+	/**
+	 * AI Trust prototype: when the crew is present, the assistant appears as
+	 * the Builder — avatar and name, matching the other crew members.
+	 */
+	crewAuthor?: boolean;
 }>();
 
 const i18n = useI18n();
@@ -154,87 +159,98 @@ function formatJson(value: unknown): string {
 		</div>
 
 		<!-- Assistant message -->
-		<template v-else>
-			<!-- Agent activity tree (handles reasoning, tool calls, sub-agents) -->
-			<AgentActivityTree v-if="props.message.agentTree" :agent-node="props.message.agentTree" />
+		<div v-else :class="crewAuthor ? $style.crewRow : undefined">
+			<span v-if="crewAuthor" :class="$style.crewAvatar">B</span>
+			<div :class="crewAuthor ? $style.crewBody : undefined">
+				<span v-if="crewAuthor" :class="$style.crewName">Builder</span>
+				<!-- Agent activity tree (handles reasoning, tool calls, sub-agents) -->
+				<AgentActivityTree v-if="props.message.agentTree" :agent-node="props.message.agentTree" />
 
-			<!-- Out-of-credits (quota exhausted): tailored state, hides raw provider/status noise -->
-			<N8nCallout v-if="isQuotaExhausted" theme="warning" data-test-id="instance-ai-out-of-credits">
-				{{ i18n.baseText(outOfCreditsTitleKey) }}
-				<template #trailingContent>
-					<N8nButton
-						variant="outline"
-						size="xsmall"
-						data-test-id="instance-ai-out-of-credits-upgrade"
-						@click="goToUpgrade('instance-ai', 'upgrade-instance-ai')"
-					>
-						{{ i18n.baseText('instanceAi.error.outOfCredits.upgrade') }}
-					</N8nButton>
-				</template>
-			</N8nCallout>
+				<!-- Out-of-credits (quota exhausted): tailored state, hides raw provider/status noise -->
+				<N8nCallout
+					v-if="isQuotaExhausted"
+					theme="warning"
+					data-test-id="instance-ai-out-of-credits"
+				>
+					{{ i18n.baseText(outOfCreditsTitleKey) }}
+					<template #trailingContent>
+						<N8nButton
+							variant="outline"
+							size="xsmall"
+							data-test-id="instance-ai-out-of-credits-upgrade"
+							@click="goToUpgrade('instance-ai', 'upgrade-instance-ai')"
+						>
+							{{ i18n.baseText('instanceAi.error.outOfCredits.upgrade') }}
+						</N8nButton>
+					</template>
+				</N8nCallout>
 
-			<!-- Run-level error -->
-			<N8nCallout v-else-if="runError" theme="danger">
-				<div :class="$style.runLevelError">
-					<N8nText bold tag="div">{{ errorTitle }}</N8nText>
-					<N8nText v-if="hasProviderError" tag="div">{{ runError }}</N8nText>
-					<details v-if="formattedTechnicalDetails">
-						<summary :class="$style.errorDetailsSummary">
-							{{ i18n.baseText('instanceAi.error.technicalDetails') }}
-						</summary>
-						<pre :class="$style.runLevelErrorDetails">{{ formattedTechnicalDetails }}</pre>
-					</details>
+				<!-- Run-level error -->
+				<N8nCallout v-else-if="runError" theme="danger">
+					<div :class="$style.runLevelError">
+						<N8nText bold tag="div">{{ errorTitle }}</N8nText>
+						<N8nText v-if="hasProviderError" tag="div">{{ runError }}</N8nText>
+						<details v-if="formattedTechnicalDetails">
+							<summary :class="$style.errorDetailsSummary">
+								{{ i18n.baseText('instanceAi.error.technicalDetails') }}
+							</summary>
+							<pre :class="$style.runLevelErrorDetails">{{ formattedTechnicalDetails }}</pre>
+						</details>
+					</div>
+
+					<template v-if="errorDetails?.statusCode" #trailingContent>
+						{{ errorDetails.statusCode }}
+					</template>
+				</N8nCallout>
+
+				<!-- Text content (shown when no agentTree, or streaming dots) -->
+				<N8nText
+					v-if="showContent && !props.message.agentTree && props.message.content"
+					size="large"
+				>
+					<InstanceAiMarkdown :content="props.message.content" />
+				</N8nText>
+
+				<!-- Status indicator while preparing context -->
+				<div v-if="statusMessage && !props.message.content" :class="$style.statusIndicator">
+					<span :class="$style.statusDot" />
+					<span>{{ statusMessage }}</span>
 				</div>
 
-				<template v-if="errorDetails?.statusCode" #trailingContent>
-					{{ errorDetails.statusCode }}
-				</template>
-			</N8nCallout>
+				<!-- Blinking cursor while waiting for response -->
+				<span
+					v-else-if="isStreaming && !props.message.content && !props.message.agentTree"
+					:class="$style.blinkingCursor"
+				/>
 
-			<!-- Text content (shown when no agentTree, or streaming dots) -->
-			<N8nText v-if="showContent && !props.message.agentTree && props.message.content" size="large">
-				<InstanceAiMarkdown :content="props.message.content" />
-			</N8nText>
+				<!-- Run stopped indicator (survives reload via the persisted cancelled status) -->
+				<div
+					v-if="runCancelled"
+					:class="$style.cancelledIndicator"
+					data-test-id="instance-ai-run-cancelled"
+				>
+					<N8nIcon icon="circle-x" size="small" />
+					<span>{{ cancelledLabel }}</span>
+				</div>
 
-			<!-- Status indicator while preparing context -->
-			<div v-if="statusMessage && !props.message.content" :class="$style.statusIndicator">
-				<span :class="$style.statusDot" />
-				<span>{{ statusMessage }}</span>
+				<!-- Response feedback -->
+				<N8nMessageRating
+					v-if="isRateable"
+					minimal
+					data-test-id="instance-ai-message-rating"
+					@feedback="onFeedback"
+				/>
+				<p
+					v-else-if="hasSubmittedFeedback"
+					:class="$style.feedbackSuccess"
+					data-test-id="instance-ai-feedback-success"
+				>
+					{{ i18n.baseText('instanceAi.feedback.success') }}
+				</p>
+
+				<pre v-if="showDebugInfo" :class="$style.debugJson">{{ formatJson(props.message) }}</pre>
 			</div>
-
-			<!-- Blinking cursor while waiting for response -->
-			<span
-				v-else-if="isStreaming && !props.message.content && !props.message.agentTree"
-				:class="$style.blinkingCursor"
-			/>
-
-			<!-- Run stopped indicator (survives reload via the persisted cancelled status) -->
-			<div
-				v-if="runCancelled"
-				:class="$style.cancelledIndicator"
-				data-test-id="instance-ai-run-cancelled"
-			>
-				<N8nIcon icon="circle-x" size="small" />
-				<span>{{ cancelledLabel }}</span>
-			</div>
-
-			<!-- Response feedback -->
-			<N8nMessageRating
-				v-if="isRateable"
-				minimal
-				data-test-id="instance-ai-message-rating"
-				@feedback="onFeedback"
-			/>
-			<p
-				v-else-if="hasSubmittedFeedback"
-				:class="$style.feedbackSuccess"
-				data-test-id="instance-ai-feedback-success"
-			>
-				{{ i18n.baseText('instanceAi.feedback.success') }}
-			</p>
-
-			<pre v-if="showDebugInfo" :class="$style.debugJson">{{ formatJson(props.message) }}</pre>
-		</template>
+		</div>
 
 		<template v-if="store.debugMode && !isUser" #actions>
 			<N8nIconButton
@@ -255,6 +271,42 @@ function formatJson(value: unknown): string {
 	flex-wrap: wrap;
 	gap: var(--spacing--2xs);
 	margin-bottom: var(--spacing--2xs);
+}
+
+/* AI Trust prototype: the assistant as the Builder crew member — the avatar,
+   name and layout match the crew feed in AgentCrewPanel. */
+.crewRow {
+	display: flex;
+	gap: 8px;
+}
+
+.crewAvatar {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	background: var(--color--primary);
+	color: #fff;
+	font-size: 11px;
+	font-weight: var(--font-weight--bold);
+}
+
+.crewBody {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+	flex: 1;
+	padding-top: 2px;
+}
+
+.crewName {
+	font-size: var(--font-size--2xs);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--primary);
 }
 
 .statusIndicator {
