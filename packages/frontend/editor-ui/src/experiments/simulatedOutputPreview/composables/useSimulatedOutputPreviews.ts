@@ -76,11 +76,13 @@ export function useSimulatedOutputPreviews() {
 
 		previewStore.setGenerating();
 
+		const runId = crypto.randomUUID();
+		const triggerSummary = buildTriggerSummary();
 		const destinationNodes = doc.allNodes.filter((node) => DESTINATION_NODE_KINDS[node.type]);
 		const previews: SimulatedPreview[] = [];
 		for (const node of destinationNodes) {
 			const preview = await buildPreviewForNode(node);
-			if (preview) previews.push(preview);
+			if (preview) previews.push({ ...preview, runId, triggerSummary });
 		}
 		if (previews.length > 0) {
 			// Prototype pacing: resolving previews is near-instant today, but the phase
@@ -90,6 +92,24 @@ export function useSimulatedOutputPreviews() {
 		} else {
 			previewStore.cancelPill();
 		}
+	}
+
+	/** The run's input: the trigger node plus a compact first-item summary */
+	function buildTriggerSummary(): string | undefined {
+		const doc = workflowDocumentStore.value;
+		const exec = workflowExecutionStateStore.value;
+		const runData = exec?.activeExecution?.data?.resultData.runData ?? {};
+		const triggerNode = doc?.allNodes.find(
+			(node) => node.type.toLowerCase().includes('trigger') && runData[node.name],
+		);
+		if (!triggerNode) return undefined;
+		const firstItem = runData[triggerNode.name]?.[0]?.data?.main?.[0]?.[0]?.json ?? {};
+		const detail = Object.entries(firstItem)
+			.filter(([, value]) => typeof value === 'string' || typeof value === 'number')
+			.slice(0, 2)
+			.map(([key, value]) => `${key}: ${String(value).slice(0, 28)}`)
+			.join(' · ');
+		return detail ? `${triggerNode.name} — ${detail}` : triggerNode.name;
 	}
 
 	async function buildPreviewForNode(node: INodeUi): Promise<SimulatedPreview | null> {

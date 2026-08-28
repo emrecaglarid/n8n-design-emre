@@ -22,6 +22,10 @@ export interface SimulatedPreview {
 	nodeExecuted: boolean;
 	nodeErrored: boolean;
 	executedAt: number;
+	/** Shared by every preview of one manual run — the Outputs tab groups by it */
+	runId?: string;
+	/** What went in: the trigger node and a compact first-item summary */
+	triggerSummary?: string;
 	/** Set when the user judged the preview (r1: thumbs pair). Undefined = unreviewed. */
 	verdict?: PreviewVerdict;
 }

@@ -1,57 +1,100 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { N8nIcon } from '@n8n/design-system';
+import { N8nAvatar, N8nIcon, N8nTooltip } from '@n8n/design-system';
 import { useToast } from '@n8n/composables/useToast';
+import { useUsersStore } from '@n8n/stores/users.store';
 import NodeIcon from '@/app/components/NodeIcon.vue';
 import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { GOOGLE_GMAIL_NODE_TYPE } from '@/app/constants/nodeTypes';
 import { useSimulatedOutputPreviewStore, type OutputRecord } from '../simulatedOutputPreview.store';
 
 /**
- * AI Trust prototype: the workflow's Outputs tab — everything the workflow has
- * produced, with the judgments attached. Also the gateway for advanced users:
- * export the judged outputs, or connect an external evaluator. Neither path is
- * required to use the tab.
+ * AI Trust prototype: the workflow's Outputs tab, grouped by run — what went
+ * in, every output that came out, and who tried it. Also the quiet gateway
+ * for advanced users: export the judged pairs or connect external tools.
  */
 const store = useSimulatedOutputPreviewStore();
 const nodeTypesStore = useNodeTypesStore();
+const usersStore = useUsersStore();
 const toast = useToast();
 
-const records = computed(() => [...store.records].reverse());
-const reviewedCount = computed(() => store.records.filter((record) => record.verdict).length);
-
-const connectMenuOpen = ref(false);
-const openImproveId = ref<string | null>(null);
-
-function rowTitle(record: OutputRecord): string {
-	if (record.kind === 'slack') return 'Slack message';
-	return record.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Gmail' : 'Email';
+interface RunGroup {
+	key: string;
+	triggerSummary?: string;
+	executedAt: number;
+	outputs: OutputRecord[];
 }
 
-function rowText(record: OutputRecord): string {
+const groups = computed<RunGroup[]>(() => {
+	const byRun = new Map<string, RunGroup>();
+	for (const record of store.records) {
+		const key = record.runId ?? record.id;
+		const group = byRun.get(key);
+		if (group) {
+			group.outputs.push(record);
+			group.executedAt = Math.max(group.executedAt, record.executedAt);
+		} else {
+			byRun.set(key, {
+				key,
+				triggerSummary: record.triggerSummary,
+				executedAt: record.executedAt,
+				outputs: [record],
+			});
+		}
+	}
+	return [...byRun.values()].sort((a, b) => b.executedAt - a.executedAt);
+});
+
+const connectMenuOpen = ref(false);
+const openImproveKey = ref<string | null>(null);
+
+function outputTitle(record: OutputRecord): string {
+	if (record.kind === 'slack') return 'Slack';
+	return record.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Email' : 'Email';
+}
+
+function outputText(record: OutputRecord): string {
 	return (record.kind === 'slack' ? record.messageText : record.body) ?? '';
 }
 
-function rowTime(record: OutputRecord): string {
-	return new Date(record.executedAt).toLocaleString(undefined, {
-		month: 'short',
-		day: 'numeric',
-		hour: '2-digit',
-		minute: '2-digit',
-	});
+function groupJudged(group: RunGroup): boolean {
+	return group.outputs.some((record) => record.verdict);
 }
 
-async function onCopy(record: OutputRecord) {
+function groupVerdictSummary(group: RunGroup): string {
+	return group.outputs
+		.filter((record) => record.verdict)
+		.map((record) => {
+			const emoji = record.verdict === 'up' ? '👍' : '👎';
+			const reason = record.reason ? ` — ${record.reason}` : '';
+			return `${emoji} ${outputTitle(record)}${reason}`;
+		})
+		.join('\n');
+}
+
+async function onCopy(group: RunGroup) {
 	try {
-		await navigator.clipboard.writeText(rowText(record));
+		const text = group.outputs
+			.map((record) => `${outputTitle(record)}:\n${outputText(record)}`)
+			.join('\n\n');
+		await navigator.clipboard.writeText(text);
 		toast.showMessage({ title: 'Copied', type: 'success' });
 	} catch {
 		toast.showMessage({ title: 'Could not copy', type: 'error' });
 	}
 }
 
-/** Real export: the judged pairs as JSON — request context, output, verdict, reason, correction. */
+function onTryNewCase() {
+	toast.showMessage({
+		title: 'Not wired yet',
+		message: 'Drafted cases aren’t wired on the workflow side — run the workflow from the editor.',
+		type: 'info',
+	});
+}
+
+/** Real export: the judged pairs as JSON — trigger, outputs, verdicts, reasons, corrections. */
 function onExport() {
+	connectMenuOpen.value = false;
 	const payload = JSON.stringify(store.records, null, 2);
 	const blob = new Blob([payload], { type: 'application/json' });
 	const url = URL.createObjectURL(blob);
@@ -67,120 +110,131 @@ function onExport() {
 	<div :class="$style.view" data-test-id="workflow-outputs-view">
 		<div :class="$style.headerRow">
 			<span :class="$style.title">Outputs</span>
-			<span :class="$style.metaChip"
-				>{{ records.length }} output{{ records.length === 1 ? '' : 's' }}</span
-			>
-			<span :class="$style.metaChip">{{ reviewedCount }} of {{ records.length }} reviewed</span>
 			<span :class="$style.headerActions">
 				<span :class="$style.connectWrapper">
-					<button :class="$style.headerButton" @click="connectMenuOpen = !connectMenuOpen">
-						Connect to evaluation
+					<button :class="$style.ghostButton" @click="connectMenuOpen = !connectMenuOpen">
+						Connect external tools
 					</button>
-					<span v-if="connectMenuOpen" :class="$style.connectMenu">
-						<span :class="$style.connectOption">
-							<span :class="$style.connectName">n8n LangTracer</span>
-							<span :class="$style.connectHint"
-								>watches new outputs · zero setup — not wired yet</span
-							>
+					<span v-if="connectMenuOpen" :class="$style.menu">
+						<button :class="$style.menuOption" @click="onExport">
+							<span :class="$style.menuName">Export judged outputs</span>
+							<span :class="$style.menuHint">JSON of trigger, outputs, verdicts, corrections</span>
+						</button>
+						<span :class="$style.menuOption">
+							<span :class="$style.menuName">n8n LangTracer</span>
+							<span :class="$style.menuHint">watches new outputs · zero setup — not wired yet</span>
 						</span>
-						<span :class="$style.connectOption">
-							<span :class="$style.connectName">LangSmith</span>
-							<span :class="$style.connectHint"
+						<span :class="$style.menuOption">
+							<span :class="$style.menuName">LangSmith</span>
+							<span :class="$style.menuHint"
 								>sends judged pairs to your workspace — not wired yet</span
 							>
 						</span>
-						<span :class="$style.connectOption">
-							<span :class="$style.connectName">OpenTelemetry</span>
-							<span :class="$style.connectHint">traces to your own collector — not wired yet</span>
+						<span :class="$style.menuOption">
+							<span :class="$style.menuName">OpenTelemetry</span>
+							<span :class="$style.menuHint">traces to your own collector — not wired yet</span>
 						</span>
 					</span>
 				</span>
-				<button :class="$style.headerButton" data-test-id="outputs-export" @click="onExport">
-					Export
+				<button
+					:class="$style.primaryButton"
+					data-test-id="outputs-try-new-case"
+					@click="onTryNewCase"
+				>
+					Try a new case
 				</button>
 			</span>
 		</div>
 
-		<div v-if="records.length === 0" :class="$style.empty">
+		<div v-if="groups.length === 0" :class="$style.empty">
 			Run the workflow — every output it produces lands here, with your judgments attached.
 		</div>
 
 		<div v-else :class="$style.list">
-			<div v-for="record in records" :key="record.id" :class="$style.row">
-				<span :class="$style.rowType">
-					<NodeIcon :node-type="nodeTypesStore.getNodeType(record.nodeType)" :size="18" />
-					<span :class="$style.rowTypeText">
-						<span :class="$style.rowTitle">{{ rowTitle(record) }}</span>
-						<span :class="$style.rowTime">{{ rowTime(record) }}</span>
+			<div v-for="group in groups" :key="group.key" :class="$style.group">
+				<div :class="$style.groupRow">
+					<span :class="$style.railLabel">Trigger</span>
+					<span :class="$style.triggerChip">
+						<N8nIcon icon="file-text" size="medium" />
+						<span :class="$style.triggerText">{{ group.triggerSummary ?? 'Manual run' }}</span>
 					</span>
-				</span>
-				<span :class="$style.rowBody">
-					<span :class="$style.rowText">{{ rowText(record) }}</span>
-					<span v-if="record.verdict === 'down' && record.reason" :class="$style.rowReason"
-						>👎 {{ record.reason }}</span
-					>
-					<span v-if="record.correction" :class="$style.rowCorrection"
-						>✏️ {{ record.correction }}</span
-					>
-				</span>
-				<span :class="$style.rowActions">
-					<span v-if="record.verdict === 'up'" :class="[$style.verdictChip, $style.verdictUp]"
-						>👍 looks good</span
-					>
-					<span
-						v-else-if="record.verdict === 'down'"
-						:class="[$style.verdictChip, $style.verdictDown]"
-						>👎</span
-					>
-					<span v-else :class="$style.verdictChip">unrated</span>
+				</div>
+
+				<div :class="$style.groupRow">
+					<span :class="$style.railLabel">Outputs</span>
+					<div :class="$style.outputsColumns">
+						<div v-for="record in group.outputs" :key="record.id" :class="$style.outputColumn">
+							<span :class="$style.outputHeader">
+								<NodeIcon :node-type="nodeTypesStore.getNodeType(record.nodeType)" :size="16" />
+								<span :class="$style.outputName">{{ outputTitle(record) }}</span>
+							</span>
+							<span :class="$style.outputText">{{ outputText(record) }}</span>
+						</div>
+					</div>
+				</div>
+
+				<div :class="$style.groupRow">
+					<span :class="$style.railLabel">Tried by</span>
+					<span :class="$style.triedBy">
+						<N8nTooltip v-if="groupJudged(group)" placement="top">
+							<template #content>
+								<span :class="$style.verdictTooltip">{{ groupVerdictSummary(group) }}</span>
+							</template>
+							<span :class="$style.avatarRing">
+								<N8nAvatar
+									:first-name="usersStore.currentUser?.firstName ?? 'You'"
+									:last-name="usersStore.currentUser?.lastName ?? ''"
+									size="small"
+								/>
+							</span>
+						</N8nTooltip>
+						<span v-else :class="$style.notTried">—</span>
+					</span>
+				</div>
+
+				<div :class="$style.groupActions">
 					<span :class="$style.improveWrapper">
 						<button
-							:class="$style.rowButton"
-							@click="openImproveId = openImproveId === record.id ? null : record.id"
+							:class="$style.ghostButton"
+							@click="openImproveKey = openImproveKey === group.key ? null : group.key"
 						>
-							Improve <span :class="$style.chevron">▾</span>
+							Improve
 						</button>
-						<span v-if="openImproveId === record.id" :class="$style.connectMenu">
-							<span :class="$style.connectOption">
-								<span :class="$style.connectName">Ask the assistant to improve</span>
-								<span :class="$style.connectHint"
-									>hands this output and your reason over — not wired yet</span
+						<span v-if="openImproveKey === group.key" :class="$style.menu">
+							<span :class="$style.menuOption">
+								<span :class="$style.menuName">Ask the assistant to improve</span>
+								<span :class="$style.menuHint"
+									>hands the outputs and your reasons over — not wired yet</span
 								>
 							</span>
-							<span :class="$style.connectOption">
-								<span :class="$style.connectName">Open the node</span>
-								<span :class="$style.connectHint"
-									>jump to {{ record.nodeName }} — not wired yet</span
-								>
+							<span :class="$style.menuOption">
+								<span :class="$style.menuName">Open in the editor</span>
+								<span :class="$style.menuHint">not wired yet</span>
 							</span>
 						</span>
 					</span>
-					<button :class="$style.iconButton" title="Copy output" @click="onCopy(record)">
+					<button :class="$style.iconButton" title="Copy outputs" @click="onCopy(group)">
 						<N8nIcon icon="copy" size="small" />
 					</button>
-				</span>
+					<button :class="$style.iconButton" title="Share — not wired yet">
+						<N8nIcon icon="share" size="small" />
+					</button>
+				</div>
 			</div>
 		</div>
 
 		<div :class="$style.drip">
-			<span :class="$style.dripTitle">✨ Things this workflow hasn't seen yet</span>
+			<span :class="$style.dripTitle">Cases not yet tried:</span>
 			<span :class="$style.dripChips">
-				<span
-					:class="$style.dripChip"
-					title="Drafted requests aren't wired on the workflow side yet"
+				<span :class="$style.dripChip" title="Drafted cases aren't wired on the workflow side yet"
 					>Try: an invoice with two clients on it</span
 				>
-				<span
-					:class="$style.dripChip"
-					title="Drafted requests aren't wired on the workflow side yet"
+				<span :class="$style.dripChip" title="Drafted cases aren't wired on the workflow side yet"
 					>Try: an amount over €10,000</span
 				>
-				<span
-					:class="$style.dripChip"
-					title="Drafted requests aren't wired on the workflow side yet"
+				<span :class="$style.dripChip" title="Drafted cases aren't wired on the workflow side yet"
 					>Try: a missing due date</span
 				>
-				<span :class="$style.dripNote">— drafted from your node settings and past runs</span>
 			</span>
 		</div>
 	</div>
@@ -204,23 +258,12 @@ function onExport() {
 .headerRow {
 	display: flex;
 	align-items: center;
-	gap: var(--spacing--2xs);
 }
 
 .title {
 	font-size: var(--font-size--lg);
 	font-weight: var(--font-weight--bold);
 	color: var(--color--text);
-	margin-right: var(--spacing--3xs);
-}
-
-.metaChip {
-	background: var(--color--foreground--tint-1, #ececec);
-	border-radius: 10px;
-	padding: 2px 10px;
-	font-size: var(--font-size--2xs);
-	color: var(--color--text);
-	font-variant-numeric: tabular-nums;
 }
 
 .headerActions {
@@ -230,7 +273,7 @@ function onExport() {
 	gap: var(--spacing--2xs);
 }
 
-.headerButton {
+.ghostButton {
 	background: var(--color--background--light-3, #fff);
 	border: 1px solid var(--color--foreground);
 	border-radius: var(--radius);
@@ -251,12 +294,33 @@ function onExport() {
 	}
 }
 
+.primaryButton {
+	background: var(--color--primary);
+	border: none;
+	border-radius: var(--radius);
+	padding: 7px 14px;
+	font-size: var(--font-size--2xs);
+	font-weight: var(--font-weight--bold);
+	color: #fff;
+	cursor: pointer;
+	transition-property: scale, filter;
+	transition-duration: 100ms;
+
+	&:hover {
+		filter: brightness(1.05);
+	}
+
+	&:active {
+		scale: 0.96;
+	}
+}
+
 .connectWrapper,
 .improveWrapper {
 	position: relative;
 }
 
-.connectMenu {
+.menu {
 	position: absolute;
 	top: calc(100% + 6px);
 	right: 0;
@@ -271,11 +335,15 @@ function onExport() {
 	overflow: hidden;
 }
 
-.connectOption {
+.menuOption {
 	display: flex;
 	flex-direction: column;
+	align-items: flex-start;
 	gap: 1px;
 	padding: 8px 12px;
+	background: transparent;
+	border: none;
+	text-align: left;
 	cursor: default;
 
 	&:hover {
@@ -283,13 +351,17 @@ function onExport() {
 	}
 }
 
-.connectName {
+button.menuOption {
+	cursor: pointer;
+}
+
+.menuName {
 	font-size: var(--font-size--2xs);
 	font-weight: var(--font-weight--bold);
 	color: var(--color--text);
 }
 
-.connectHint {
+.menuHint {
 	font-size: var(--font-size--3xs);
 	color: var(--color--text--tint-1);
 }
@@ -307,127 +379,118 @@ function onExport() {
 	background: var(--color--background--light-3, #fff);
 	border: var(--border);
 	border-radius: var(--radius--lg);
-	overflow: visible;
 }
 
-.row {
+.group {
 	display: flex;
-	align-items: flex-start;
+	flex-direction: column;
 	gap: var(--spacing--sm);
-	padding: var(--spacing--xs) var(--spacing--sm);
+	padding: var(--spacing--sm) var(--spacing--md);
 
 	& + & {
 		border-top: var(--border);
 	}
 }
 
-.rowType {
-	flex: 0 0 150px;
+.groupRow {
 	display: flex;
+	align-items: flex-start;
+	gap: var(--spacing--md);
+}
+
+.railLabel {
+	flex: 0 0 200px;
+	font-size: var(--font-size--2xs);
+	color: var(--color--text);
+	padding-top: var(--spacing--4xs);
+}
+
+.triggerChip {
+	display: inline-flex;
 	align-items: center;
 	gap: var(--spacing--2xs);
-}
-
-.rowTypeText {
-	display: flex;
-	flex-direction: column;
-}
-
-.rowTitle {
-	font-size: var(--font-size--2xs);
-	font-weight: var(--font-weight--bold);
-	color: var(--color--text);
-}
-
-.rowTime {
-	font-size: var(--font-size--3xs);
+	border: var(--border);
+	border-radius: var(--radius);
+	padding: var(--spacing--2xs) var(--spacing--xs);
 	color: var(--color--text--tint-1);
 }
 
-.rowBody {
+.triggerText {
+	font-size: var(--font-size--xs);
+	color: var(--color--text);
+}
+
+.outputsColumns {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	gap: var(--spacing--xl);
+}
+
+.outputColumn {
 	flex: 1;
 	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	gap: var(--spacing--3xs);
+	gap: var(--spacing--2xs);
 }
 
-.rowText {
+.outputHeader {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--2xs);
+	padding-bottom: var(--spacing--3xs);
+	border-bottom: var(--border);
+}
+
+.outputName {
 	font-size: var(--font-size--xs);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text);
+}
+
+.outputText {
+	font-size: var(--font-size--sm);
 	color: var(--color--text);
 	line-height: 1.5;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	display: -webkit-box;
-	-webkit-line-clamp: 3;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
+	max-height: 200px;
+	overflow-y: auto;
 }
 
-.rowReason {
-	font-size: var(--font-size--2xs);
-	color: var(--color--warning);
-}
-
-.rowCorrection {
-	font-size: var(--font-size--2xs);
-	color: var(--color--text--tint-1);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.rowActions {
-	flex: 0 0 auto;
+.triedBy {
 	display: flex;
 	align-items: center;
-	gap: var(--spacing--2xs);
 }
 
-.verdictChip {
-	font-size: var(--font-size--3xs);
-	color: var(--color--text--tint-1);
-	white-space: nowrap;
-}
-
-.verdictUp {
-	color: var(--color--success);
-	font-weight: var(--font-weight--bold);
-}
-
-.verdictDown {
-	color: var(--color--warning);
-	font-weight: var(--font-weight--bold);
-}
-
-.rowButton {
+.avatarRing {
 	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	background: var(--color--background--light-3, #fff);
-	border: 1px solid var(--color--foreground);
-	border-radius: var(--radius);
-	padding: 5px 10px;
-	font-size: var(--font-size--2xs);
-	color: var(--color--text);
-	cursor: pointer;
-
-	&:hover {
-		border-color: var(--color--text--tint-1);
-	}
+	border-radius: 50%;
+	box-shadow: 0 0 0 2px var(--color--success);
 }
 
-.chevron {
-	font-size: 9px;
+.verdictTooltip {
+	white-space: pre-line;
+}
+
+.notTried {
 	color: var(--color--text--tint-1);
+}
+
+.groupActions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--spacing--2xs);
 }
 
 .iconButton {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
+	width: 32px;
+	height: 30px;
 	background: var(--color--background--light-3, #fff);
 	border: 1px solid var(--color--foreground);
 	border-radius: var(--radius);
@@ -440,14 +503,9 @@ function onExport() {
 }
 
 .drip {
-	margin-top: auto;
 	display: flex;
 	flex-direction: column;
 	gap: var(--spacing--2xs);
-	background: var(--color--background--light-3, #fff);
-	border: var(--border);
-	border-radius: var(--radius--lg);
-	padding: var(--spacing--xs) var(--spacing--sm);
 }
 
 .dripTitle {
@@ -464,20 +522,11 @@ function onExport() {
 }
 
 .dripChip {
-	border: 1px solid var(--color--foreground);
+	background: var(--color--foreground--tint-1, #ececec);
 	border-radius: 15px;
-	padding: 4px 12px;
+	padding: 5px 14px;
 	font-size: var(--font-size--2xs);
 	color: var(--color--text);
 	cursor: default;
-
-	&:hover {
-		border-color: var(--color--text--tint-1);
-	}
-}
-
-.dripNote {
-	font-size: var(--font-size--3xs);
-	color: var(--color--text--tint-1);
 }
 </style>
