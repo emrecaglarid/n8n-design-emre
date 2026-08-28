@@ -82,7 +82,6 @@ function truncate(text: string, max = 140): string {
 
 			<div v-else-if="item.kind === 'verdict'" :class="$style.verdictWrap">
 				<span :class="$style.verdictBubble">👎 {{ item.text }}</span>
-				<span :class="$style.verdictNote">your verdict on the stage, captured here</span>
 			</div>
 
 			<div v-else-if="item.kind === 'finding'" :class="$style.message">
@@ -215,7 +214,7 @@ function truncate(text: string, max = 140): string {
 }
 
 .author {
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--2xs);
 	font-weight: var(--font-weight--bold);
 }
 
@@ -228,7 +227,7 @@ function truncate(text: string, max = 140): string {
 }
 
 .text {
-	font-size: var(--font-size--2xs);
+	font-size: var(--font-size--sm);
 	color: var(--color--text);
 	line-height: 1.45;
 	text-wrap: pretty;
@@ -237,7 +236,7 @@ function truncate(text: string, max = 140): string {
 
 .systemLine {
 	align-self: center;
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--2xs);
 	color: var(--color--text--tint-1);
 	text-align: center;
 	text-wrap: pretty;
@@ -255,17 +254,11 @@ function truncate(text: string, max = 140): string {
 .verdictBubble {
 	background: var(--color--background);
 	border-radius: var(--radius--lg);
-	padding: 8px 10px;
-	font-size: var(--font-size--2xs);
+	padding: 8px 12px;
+	font-size: var(--font-size--sm);
 	color: var(--color--text);
 	line-height: 1.4;
 	overflow-wrap: anywhere;
-}
-
-.verdictNote {
-	align-self: flex-end;
-	font-size: var(--font-size--3xs);
-	color: var(--color--text--tint-1);
 }
 
 .chip {
@@ -276,9 +269,9 @@ function truncate(text: string, max = 140): string {
 	white-space: nowrap;
 	background: var(--color--background--light-2);
 	border: 1px solid var(--color--foreground);
-	border-radius: 14px;
-	padding: 4px 10px;
-	font-size: var(--font-size--3xs);
+	border-radius: 15px;
+	padding: 5px 12px;
+	font-size: var(--font-size--xs);
 	color: var(--color--text);
 	cursor: pointer;
 	transition-property: scale, background-color;
@@ -303,7 +296,7 @@ function truncate(text: string, max = 140): string {
 	background: transparent;
 	border: none;
 	padding: 0;
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--2xs);
 	color: var(--color--text--tint-1);
 	text-decoration: underline;
 	cursor: pointer;
@@ -331,7 +324,7 @@ function truncate(text: string, max = 140): string {
 }
 
 .diffAdded {
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--xs);
 	color: #1f7a4d;
 	background: #e3f5e9;
 	border-radius: 4px;
@@ -352,7 +345,7 @@ function truncate(text: string, max = 140): string {
 	border: none;
 	border-radius: var(--radius);
 	color: #fff;
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--2xs);
 	font-weight: var(--font-weight--bold);
 	padding: 5px 11px;
 	cursor: pointer;
@@ -368,7 +361,7 @@ function truncate(text: string, max = 140): string {
 	background: transparent;
 	border: none;
 	padding: 0;
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--2xs);
 	color: var(--color--text--tint-1);
 	cursor: pointer;
 
@@ -378,7 +371,7 @@ function truncate(text: string, max = 140): string {
 }
 
 .diffStatus {
-	font-size: var(--font-size--3xs);
+	font-size: var(--font-size--2xs);
 	color: var(--color--text--tint-1);
 }
 </style>
