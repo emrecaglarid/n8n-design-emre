@@ -32,6 +32,11 @@ export function useSimulatedOutputPreviews() {
 	const workflowExecutionStateStore = injectWorkflowExecutionStateStore();
 	const previewStore = useSimulatedOutputPreviewStore();
 
+	// A freshly opened editor starts in the default state — no leftover deck,
+	// pill, or node stacks from a previous visit, Execute button visible. The
+	// persisted records (Outputs tab) are untouched.
+	previewStore.clearAll();
+
 	// The Outputs tab and the persisted records are scoped per workflow.
 	watch(
 		() => workflowDocumentStore.value?.workflowId ?? null,
