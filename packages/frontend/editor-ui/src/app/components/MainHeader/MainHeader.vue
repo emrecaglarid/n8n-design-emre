@@ -18,6 +18,10 @@ import { useInjectWorkflowId } from '@/app/composables/useInjectWorkflowId';
 import type { FolderShortInfo } from '@/features/core/folders/folders.types';
 
 import { useToast } from '@n8n/composables/useToast';
+// AI Trust prototype: the Evaluations tab is replaced by the Outputs tab, an
+// overlay over the current route rather than a navigation.
+import { useSimulatedOutputPreviewStore } from '@/experiments/simulatedOutputPreview/simulatedOutputPreview.store';
+import WorkflowOutputsView from '@/experiments/simulatedOutputPreview/components/WorkflowOutputsView.vue';
 const router = useRouter();
 const route = useRoute();
 const locale = useI18n();
@@ -49,11 +53,14 @@ const executionRoutes: VIEWS[] = [
 	VIEWS.WORKFLOW_EXECUTIONS,
 	VIEWS.EXECUTION_PREVIEW,
 ];
+const simulatedOutputStore = useSimulatedOutputPreviewStore();
+
 const tabBarItems = computed(() => {
 	return [
 		{ value: MAIN_HEADER_TABS.WORKFLOW, label: locale.baseText('generic.editor') },
 		{ value: MAIN_HEADER_TABS.EXECUTIONS, label: locale.baseText('generic.executions') },
-		{ value: MAIN_HEADER_TABS.EVALUATION, label: locale.baseText('generic.tests') },
+		// AI Trust prototype: Outputs replaces Evaluations on this fork.
+		{ value: MAIN_HEADER_TABS.EVALUATION, label: 'Outputs' },
 	];
 });
 
@@ -114,7 +121,7 @@ function syncTabsWithRoute(to: RouteLocation, from?: RouteLocation): void {
 	// Update the active tab based on the current route
 	if (to.name && isViewRoute(to.name)) {
 		const matchingTab = routeTabMapping.find(({ routes }) => routes.includes(to.name as VIEWS));
-		if (matchingTab) {
+		if (matchingTab && !simulatedOutputStore.outputsTabOpen) {
 			activeHeaderTab.value = matchingTab.tab;
 		}
 	}
@@ -136,8 +143,13 @@ function syncTabsWithRoute(to: RouteLocation, from?: RouteLocation): void {
 function onTabSelected(tab: MAIN_HEADER_TABS, event: MouseEvent) {
 	const openInNewTab = event.ctrlKey || event.metaKey;
 
+	if (tab !== MAIN_HEADER_TABS.EVALUATION) {
+		simulatedOutputStore.outputsTabOpen = false;
+	}
+
 	switch (tab) {
 		case MAIN_HEADER_TABS.WORKFLOW:
+			activeHeaderTab.value = MAIN_HEADER_TABS.WORKFLOW;
 			void navigateToWorkflowView(openInNewTab);
 			break;
 
@@ -146,7 +158,10 @@ function onTabSelected(tab: MAIN_HEADER_TABS, event: MouseEvent) {
 			break;
 
 		case MAIN_HEADER_TABS.EVALUATION:
-			void navigateToEvaluationsView(openInNewTab);
+			// AI Trust prototype: the Outputs tab is an overlay on the current
+			// route, not a navigation — nothing to open in a new tab.
+			simulatedOutputStore.outputsTabOpen = true;
+			activeHeaderTab.value = MAIN_HEADER_TABS.EVALUATION;
 			break;
 
 		default:
@@ -211,23 +226,8 @@ async function navigateToExecutionsView(openInNewTab: boolean) {
 	}
 }
 
-async function navigateToEvaluationsView(openInNewTab: boolean) {
-	const routeToNavigateTo: RouteLocationRaw = {
-		name: VIEWS.EVALUATION_EDIT,
-		params: { workflowId: workflowId.value },
-		query: route.query,
-	};
-
-	if (openInNewTab) {
-		const { href } = router.resolve(routeToNavigateTo);
-		window.open(href, '_blank');
-	} else if (route.name !== routeToNavigateTo.name) {
-		dirtyState.value = uiStore.stateIsDirty;
-		workflowToReturnTo.value = workflowId.value;
-		activeHeaderTab.value = MAIN_HEADER_TABS.EVALUATION;
-		await router.push(routeToNavigateTo);
-	}
-}
+// AI Trust prototype: the Evaluations navigation is replaced by the Outputs
+// overlay (see onTabSelected). Kept out rather than dead-coded.
 
 async function onWorkflowDeactivated() {
 	if (
@@ -281,6 +281,9 @@ async function onWorkflowDeactivated() {
 				@update:model-value="onTabSelected"
 			/>
 		</div>
+		<Teleport to="body">
+			<WorkflowOutputsView v-if="simulatedOutputStore.outputsTabOpen && onWorkflowPage" />
+		</Teleport>
 	</div>
 </template>
 

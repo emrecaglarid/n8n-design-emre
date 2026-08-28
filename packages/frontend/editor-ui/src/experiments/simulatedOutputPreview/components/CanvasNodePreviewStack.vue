@@ -29,7 +29,7 @@ function onClick(event: MouseEvent) {
 		<span :class="$style.layerMid" />
 		<span :class="$style.chip">
 			<N8nIcon icon="eye" size="xsmall" />
-			{{ count }}
+			{{ count }} output{{ count === 1 ? '' : 's' }}
 		</span>
 	</button>
 </template>

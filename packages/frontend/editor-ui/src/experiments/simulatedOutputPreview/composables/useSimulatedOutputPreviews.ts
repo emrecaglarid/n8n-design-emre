@@ -32,6 +32,13 @@ export function useSimulatedOutputPreviews() {
 	const workflowExecutionStateStore = injectWorkflowExecutionStateStore();
 	const previewStore = useSimulatedOutputPreviewStore();
 
+	// The Outputs tab and the persisted records are scoped per workflow.
+	watch(
+		() => workflowDocumentStore.value?.workflowId ?? null,
+		(workflowId) => previewStore.setWorkflow(workflowId),
+		{ immediate: true },
+	);
+
 	watch(
 		() => workflowExecutionStateStore.value?.isWorkflowRunning,
 		(running, wasRunning) => {

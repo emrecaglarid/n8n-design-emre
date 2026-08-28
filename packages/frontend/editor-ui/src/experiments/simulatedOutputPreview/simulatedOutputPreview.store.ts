@@ -33,9 +33,41 @@ export interface SimulatedPreview {
  * previews render as a stacked deck above it. Judged or dismissed previews
  * fly into a stack behind their destination node.
  */
+/**
+ * A judged or dismissed output, kept per workflow so the Outputs tab can show
+ * everything the workflow has produced across runs and reloads.
+ */
+export interface OutputRecord extends SimulatedPreview {
+	workflowId: string;
+	reason?: string;
+	correction?: string;
+}
+
+const RECORDS_STORAGE_PREFIX = 'N8N_EXPERIMENT_SIM_OUTPUTS';
+
+function recordsStorageKey(workflowId: string): string {
+	return `${RECORDS_STORAGE_PREFIX}:${workflowId}`;
+}
+
+function loadRecords(workflowId: string): OutputRecord[] {
+	try {
+		const raw = localStorage.getItem(recordsStorageKey(workflowId));
+		const parsed: unknown = raw ? JSON.parse(raw) : [];
+		return Array.isArray(parsed) ? (parsed as OutputRecord[]) : [];
+	} catch {
+		return [];
+	}
+}
+
 export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPreview', () => {
 	/** Previews of the latest manual run, in rank order (most consequential first) */
 	const previews = ref<SimulatedPreview[]>([]);
+	/** The workflow the current editor session belongs to */
+	const currentWorkflowId = ref<string | null>(null);
+	/** Judged/dismissed outputs of the current workflow, persisted locally */
+	const records = ref<OutputRecord[]>([]);
+	/** The Outputs tab overlay (replaces the Evaluations tab in this prototype) */
+	const outputsTabOpen = ref(false);
 	const frontPreviewId = ref<string | null>(null);
 	/** Judged/dismissed previews, stacked behind their destination node */
 	const stacks = ref<Record<string, SimulatedPreview[]>>({});
@@ -58,11 +90,47 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		return stacks.value[nodeName]?.length ?? 0;
 	}
 
-	function pushToStack(preview: SimulatedPreview) {
+	function setWorkflow(workflowId: string | null) {
+		if (workflowId === currentWorkflowId.value) return;
+		currentWorkflowId.value = workflowId;
+		records.value = workflowId ? loadRecords(workflowId) : [];
+		outputsTabOpen.value = false;
+	}
+
+	function persistRecords() {
+		if (!currentWorkflowId.value) return;
+		try {
+			localStorage.setItem(
+				recordsStorageKey(currentWorkflowId.value),
+				JSON.stringify(records.value.slice(-100)),
+			);
+		} catch {
+			// Storage full or unavailable — the tab just won't remember this one.
+		}
+	}
+
+	function recordOutput(
+		preview: SimulatedPreview,
+		details?: { reason?: string; correction?: string },
+	) {
+		const workflowId = currentWorkflowId.value;
+		if (!workflowId) return;
+		const existing = records.value.findIndex((record) => record.id === preview.id);
+		const record: OutputRecord = { ...preview, workflowId, ...details };
+		if (existing >= 0) records.value.splice(existing, 1, record);
+		else records.value.push(record);
+		persistRecords();
+	}
+
+	function pushToStack(
+		preview: SimulatedPreview,
+		details?: { reason?: string; correction?: string },
+	) {
 		stacks.value = {
 			...stacks.value,
 			[preview.nodeName]: [...(stacks.value[preview.nodeName] ?? []), preview],
 		};
+		recordOutput(preview, details);
 	}
 
 	/** A manual run started (only called when the workflow has destination nodes) */
@@ -95,10 +163,14 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 	}
 
 	/** Judge or close one preview: it leaves the deck and lands in the node's stack */
-	function dismissPreview(id: string, verdict?: PreviewVerdict) {
+	function dismissPreview(
+		id: string,
+		verdict?: PreviewVerdict,
+		details?: { reason?: string; correction?: string },
+	) {
 		const preview = previews.value.find((p) => p.id === id);
 		if (!preview) return;
-		pushToStack({ ...preview, verdict });
+		pushToStack({ ...preview, verdict }, details);
 		previews.value = previews.value.filter((p) => p.id !== id);
 		if (frontPreviewId.value === id) {
 			frontPreviewId.value = previews.value[0]?.id ?? null;
@@ -149,6 +221,10 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		isPillActive,
 		showAll,
 		runOutputsTotal,
+		currentWorkflowId,
+		records,
+		outputsTabOpen,
+		setWorkflow,
 		stackCount,
 		startRun,
 		setGenerating,

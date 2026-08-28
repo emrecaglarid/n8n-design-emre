@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import NodeIcon from '@/app/components/NodeIcon.vue';
 import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import {
@@ -9,6 +9,7 @@ import {
 } from '../simulatedOutputPreview.store';
 import { useSimulatedOutputPreviews } from '../composables/useSimulatedOutputPreviews';
 import OutputPreviewCard from './OutputPreviewCard.vue';
+import OutputVerdictModal from './OutputVerdictModal.vue';
 
 const emit = defineEmits<{
 	stop: [];
@@ -20,7 +21,7 @@ const store = useSimulatedOutputPreviewStore();
 const nodeTypesStore = useNodeTypesStore();
 
 const pillLabel = computed(() =>
-	store.pillPhase === 'generating' ? 'Generating output previews…' : 'Running nodes…',
+	store.pillPhase === 'generating' ? 'Generating outputs…' : 'Running nodes…',
 );
 
 const outputsSubtitle = computed(() => {
@@ -35,9 +36,24 @@ function behindTitle(preview: SimulatedPreview): string {
 	return 'Email';
 }
 
+/** 👎 opens the reason modal; 👍 dismisses straight away */
+const rejecting = ref<SimulatedPreview | null>(null);
+
 async function onVerdict(preview: SimulatedPreview, verdict: PreviewVerdict) {
+	if (verdict === 'down') {
+		rejecting.value = preview;
+		return;
+	}
 	await flyToNode(preview);
 	store.dismissPreview(preview.id, verdict);
+}
+
+async function onRejectSave(details: { reason: string; correction?: string }) {
+	const preview = rejecting.value;
+	rejecting.value = null;
+	if (!preview) return;
+	await flyToNode(preview);
+	store.dismissPreview(preview.id, 'down', details);
 }
 
 async function onClose(preview: SimulatedPreview) {
@@ -249,6 +265,13 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 				</Transition>
 			</div>
 		</Transition>
+
+		<OutputVerdictModal
+			v-if="rejecting"
+			:preview="rejecting"
+			@save="onRejectSave"
+			@cancel="rejecting = null"
+		/>
 	</div>
 </template>
 
