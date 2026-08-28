@@ -12,6 +12,7 @@ import type {
 import SlackMessagePreview from './SlackMessagePreview.vue';
 import EmailPreview from './EmailPreview.vue';
 import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
+import AudienceDropdown from '@/experiments/destinationPreviews/AudienceDropdown.vue';
 import type { PreviewDestination } from '@/experiments/destinationPreviews/surfaceDial';
 
 const props = defineProps<{
@@ -33,12 +34,10 @@ const title = computed(() => {
 	return props.preview.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Gmail' : 'Email';
 });
 
-// The rendering surface is fixed by the destination node; the dropdown only
-// moves where the output would land.
+// The rendering surface is fixed by the destination node; the dropdowns only
+// move where the output would land and who can see it.
 const destination = ref<PreviewDestination>({ kind: 'preview' });
-const honestyChip = computed(() =>
-	destination.value.kind === 'test' ? 'Draft — nothing external' : 'Preview only',
-);
+const audience = ref<'you' | 'team'>('you');
 
 const baselineText = computed(() => {
 	if (!props.baseline) return '';
@@ -61,7 +60,8 @@ const newText = computed(
 		<div :class="$style.header">
 			<NodeIcon :node-type="nodeType" :size="16" />
 			<span :class="$style.title">{{ title }}</span>
-			<span :class="$style.previewOnly">{{ honestyChip }}</span>
+			<DestinationDropdown v-model="destination" />
+			<AudienceDropdown v-model="audience" />
 			<button :class="$style.closeButton" title="Close" @click="emit('close')">
 				<N8nIcon icon="x" size="small" />
 			</button>
@@ -92,7 +92,6 @@ const newText = computed(
 			/>
 		</div>
 		<div :class="$style.footer">
-			<DestinationDropdown v-model="destination" :class="$style.dialSelector" />
 			<button
 				:class="$style.thumbsDownButton"
 				title="Not right"
@@ -172,16 +171,6 @@ const newText = computed(
 	white-space: nowrap;
 }
 
-.previewOnly {
-	flex: 0 0 auto;
-	font-size: var(--font-size--3xs);
-	color: var(--color--warning);
-	background: var(--color--warning--tint-2, var(--color--foreground--tint-2));
-	border-radius: var(--radius--sm);
-	padding: 2px var(--spacing--2xs);
-	white-space: nowrap;
-}
-
 .closeButton {
 	position: relative;
 	flex: 0 0 auto;
@@ -253,16 +242,10 @@ const newText = computed(
 .footer {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	justify-content: flex-end;
 	gap: var(--spacing--2xs);
 	padding: var(--spacing--2xs) var(--spacing--xs);
 	border-top: var(--border);
-}
-
-.dialSelector {
-	flex-shrink: 1;
-	min-width: 0;
-	margin-right: auto;
 }
 
 .thumbsDownButton {

@@ -9,6 +9,7 @@ import { isDataTableDataset, toCaseSource } from '@/features/agents/utils/agentE
 import SlackWindow from '@/experiments/destinationPreviews/slack/SlackWindow.vue';
 import SlackMessage from '@/experiments/destinationPreviews/slack/SlackMessage.vue';
 import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
+import AudienceDropdown from '@/experiments/destinationPreviews/AudienceDropdown.vue';
 import type { PreviewDestination } from '@/experiments/destinationPreviews/surfaceDial';
 import { useAgentCrewStore } from '@/experiments/agentCrew/agentCrew.store';
 
@@ -61,14 +62,8 @@ const channelName = computed(() =>
 	destination.value.kind === 'test' ? destination.value.channel : 'client-requests',
 );
 
-// ── Audience: who can see this preview. Visual state only — sharing the
-//    session isn't wired, and the menu says so. ──────────────────────────────
+// ── Audience: who can see this preview. Visual state only. ──────────────────
 const audience = ref<'you' | 'team'>('you');
-const audienceMenuOpen = ref(false);
-function pickAudience(value: 'you' | 'team') {
-	audience.value = value;
-	audienceMenuOpen.value = false;
-}
 
 // ── Tester probes and fix replays staged from the crew panel ─────────────────
 const crew = useAgentCrewStore();
@@ -285,22 +280,7 @@ onMounted(() => {
 		<template v-else>
 			<div :class="$style.stageToolbar">
 				<DestinationDropdown v-model="destination" dark />
-				<div :class="$style.audienceWrapper">
-					<button :class="$style.audienceTrigger" @click="audienceMenuOpen = !audienceMenuOpen">
-						{{ audience === 'you' ? 'Only you' : 'Team' }}
-						<span :class="$style.audienceChevron">▾</span>
-					</button>
-					<div v-if="audienceMenuOpen" :class="$style.audienceMenu">
-						<button :class="$style.audienceOption" @click="pickAudience('you')">
-							<span :class="$style.audienceName">Only you</span>
-							<span :class="$style.audienceHint">this preview stays private</span>
-						</button>
-						<button :class="$style.audienceOption" @click="pickAudience('team')">
-							<span :class="$style.audienceName">Team</span>
-							<span :class="$style.audienceHint">everyone in this project can watch and judge</span>
-						</button>
-					</div>
-				</div>
+				<AudienceDropdown v-model="audience" dark />
 			</div>
 
 			<div ref="windowWrapper" :class="$style.windowWrapper">
@@ -507,79 +487,6 @@ onMounted(() => {
 	gap: 10px;
 	width: 100%;
 	max-width: 680px;
-}
-
-.audienceWrapper {
-	position: relative;
-	display: inline-flex;
-}
-
-.audienceTrigger {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	padding: 5px 12px;
-	border-radius: var(--radius--md);
-	background: rgba(255, 255, 255, 0.1);
-	border: 1px solid rgba(255, 255, 255, 0.2);
-	font-size: 11px;
-	font-weight: var(--font-weight--bold);
-	color: rgba(255, 255, 255, 0.92);
-	cursor: pointer;
-	transition-property: scale;
-	transition-duration: 100ms;
-
-	&:active {
-		scale: 0.96;
-	}
-}
-
-.audienceChevron {
-	font-size: 9px;
-	opacity: 0.7;
-}
-
-.audienceMenu {
-	position: absolute;
-	top: calc(100% + 6px);
-	left: 0;
-	z-index: 30;
-	display: flex;
-	flex-direction: column;
-	min-width: 240px;
-	padding: 4px;
-	background: var(--color--background--light-2, #fff);
-	border: 1px solid var(--color--foreground);
-	border-radius: var(--radius--lg);
-	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
-}
-
-.audienceOption {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 1px;
-	padding: 7px 10px;
-	background: transparent;
-	border: none;
-	border-radius: var(--radius);
-	text-align: left;
-	cursor: pointer;
-
-	&:hover {
-		background: var(--color--background);
-	}
-}
-
-.audienceName {
-	font-size: 11px;
-	font-weight: var(--font-weight--bold);
-	color: var(--color--text);
-}
-
-.audienceHint {
-	font-size: 10px;
-	color: var(--color--text--tint-1);
 }
 
 .threadDivider {

@@ -281,9 +281,8 @@ async function onWorkflowDeactivated() {
 				@update:model-value="onTabSelected"
 			/>
 		</div>
-		<Teleport to="body">
-			<WorkflowOutputsView v-if="simulatedOutputStore.outputsTabOpen && onWorkflowPage" />
-		</Teleport>
+		<!-- Rendered inside the header so the floating tab bar (z 100) stays above it -->
+		<WorkflowOutputsView v-if="simulatedOutputStore.outputsTabOpen && onWorkflowPage" />
 	</div>
 </template>
 

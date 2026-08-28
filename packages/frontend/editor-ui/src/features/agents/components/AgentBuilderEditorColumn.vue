@@ -25,8 +25,8 @@ import AgentMcpPanel from './AgentMcpPanel.vue';
 import AgentMemoryPanel from './AgentMemoryPanel.vue';
 import AgentSubAgentsPanel from './AgentSubAgentsPanel.vue';
 import AgentBuilderTabPanel from './AgentBuilderTabPanel.vue';
-import AgentEvalsSection from './AgentEvalsSection.vue';
 import AgentPreviewStage from '@/experiments/agentPreviewStage/AgentPreviewStage.vue';
+import AgentOutputsView from '@/experiments/agentOutputs/AgentOutputsView.vue';
 
 const props = defineProps<{
 	activeMainTab: AgentBuilderMainTab;
@@ -279,14 +279,10 @@ const i18n = useI18n();
 					v-else-if="activeMainTab === 'evals'"
 					data-testid="agent-evals-tab-content"
 				>
-					<AgentEvalsSection
+					<AgentOutputsView
 						:project-id="projectId"
 						:agent-id="agentId"
-						:agent-unsaved="agentUnsaved"
-						:disabled="childrenDisabled"
-						:can-run="canExecuteAgent"
-						:generating="generatingEvalCases"
-						@generate="emit('generate-eval-cases')"
+						:agent-name="localConfig?.name"
 					/>
 				</AgentBuilderTabPanel>
 			</div>

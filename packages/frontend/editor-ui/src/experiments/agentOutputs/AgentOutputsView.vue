@@ -1,83 +1,77 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { N8nAvatar, N8nIcon, N8nTooltip } from '@n8n/design-system';
 import { useToast } from '@n8n/composables/useToast';
 import { useUsersStore } from '@n8n/stores/users.store';
-import NodeIcon from '@/app/components/NodeIcon.vue';
-import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
-import { GOOGLE_GMAIL_NODE_TYPE } from '@/app/constants/nodeTypes';
-import { useSimulatedOutputPreviewStore, type OutputRecord } from '../simulatedOutputPreview.store';
+
+import { useAgentEvalsStore } from '@/features/agents/agentEvals.store';
+import type { AgentEvalResultRecord } from '@/features/agents/agentEvals.types';
+import { readAgentAnswer, readCaseRequest } from '@/features/agents/utils/agent-eval-review';
+import { isDataTableDataset, toCaseSource } from '@/features/agents/utils/agentEvalCases.utils';
 
 /**
- * AI Trust prototype: the workflow's Outputs tab, grouped by run — what went
- * in, every output that came out, and who tried it. Also the quiet gateway
- * for advanced users: export the judged pairs or connect external tools.
+ * AI Trust prototype: the agent's Outputs tab in the run-grouped layout —
+ * what was asked, what the agent answered, and who tried it. Data comes from
+ * the latest run of the quietly collected requests; judging itself happens on
+ * the Preview stage, this is the record.
  */
-const store = useSimulatedOutputPreviewStore();
-const nodeTypesStore = useNodeTypesStore();
+const props = defineProps<{
+	projectId: string;
+	agentId: string;
+	agentName?: string;
+}>();
+
+const store = useAgentEvalsStore();
 const usersStore = useUsersStore();
 const toast = useToast();
 
-interface RunGroup {
-	key: string;
-	triggerSummary?: string;
-	executedAt: number;
-	outputs: OutputRecord[];
-}
+const loading = ref(true);
+const runId = ref<string | null>(null);
 
-const groups = computed<RunGroup[]>(() => {
-	const byRun = new Map<string, RunGroup>();
-	for (const record of store.records) {
-		const key = record.runId ?? record.id;
-		const group = byRun.get(key);
-		if (group) {
-			group.outputs.push(record);
-			group.executedAt = Math.max(group.executedAt, record.executedAt);
-		} else {
-			byRun.set(key, {
-				key,
-				triggerSummary: record.triggerSummary,
-				executedAt: record.executedAt,
-				outputs: [record],
-			});
-		}
-	}
-	return [...byRun.values()].sort((a, b) => b.executedAt - a.executedAt);
-});
+const dataset = computed(() => store.getDatasets(props.agentId)[0]);
+const review = computed(() => (runId.value ? store.getReview(runId.value) : null));
+const results = computed(() => review.value?.results ?? []);
 
 const connectMenuOpen = ref(false);
-const openImproveKey = ref<string | null>(null);
+const openImproveId = ref<string | null>(null);
 
-function outputTitle(record: OutputRecord): string {
-	if (record.kind === 'slack') return 'Slack';
-	return record.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Email' : 'Email';
+const agentDisplayName = computed(() => props.agentName?.trim() || 'Your agent');
+
+function requestOf(result: AgentEvalResultRecord): string {
+	return readCaseRequest(result.input);
 }
 
-function outputText(record: OutputRecord): string {
-	return (record.kind === 'slack' ? record.messageText : record.body) ?? '';
+function answerOf(result: AgentEvalResultRecord): string {
+	return readAgentAnswer(result.output) ?? '(no answer)';
 }
 
-function groupJudged(group: RunGroup): boolean {
-	return group.outputs.some((record) => record.verdict);
+function ratingOf(result: AgentEvalResultRecord) {
+	return review.value?.ratingsByResultId[result.id] ?? null;
 }
 
-function groupVerdictSummary(group: RunGroup): string {
-	return group.outputs
-		.filter((record) => record.verdict)
-		.map((record) => {
-			const emoji = record.verdict === 'up' ? '👍' : '👎';
-			const reason = record.reason ? ` — ${record.reason}` : '';
-			return `${emoji} ${outputTitle(record)}${reason}`;
-		})
-		.join('\n');
+function verdictTooltip(result: AgentEvalResultRecord): string {
+	const rating = ratingOf(result);
+	if (!rating) return '';
+	const emoji = rating.vote === 'up' ? '👍' : '👎';
+	return rating.comment ? `${emoji} ${rating.comment}` : emoji;
 }
 
-async function onCopy(group: RunGroup) {
+/** Requests in the set that the latest run hasn't tried */
+const untriedCases = computed(() => {
+	const current = dataset.value;
+	if (!current) return [];
+	const triedRowIds = new Set(
+		results.value.map((result) => result.sourceRowId).filter((id) => id !== null),
+	);
+	return store
+		.getCases(current.id)
+		.filter((candidate) => !triedRowIds.has(String(candidate.rowId)))
+		.slice(0, 3);
+});
+
+async function onCopy(result: AgentEvalResultRecord) {
 	try {
-		const text = group.outputs
-			.map((record) => `${outputTitle(record)}:\n${outputText(record)}`)
-			.join('\n\n');
-		await navigator.clipboard.writeText(text);
+		await navigator.clipboard.writeText(answerOf(result));
 		toast.showMessage({ title: 'Copied', type: 'success' });
 	} catch {
 		toast.showMessage({ title: 'Could not copy', type: 'error' });
@@ -86,28 +80,57 @@ async function onCopy(group: RunGroup) {
 
 function onTryNewCase() {
 	toast.showMessage({
-		title: 'Not wired yet',
-		message: 'Drafted cases aren’t wired on the workflow side — run the workflow from the editor.',
+		title: 'Try it on the stage',
+		message: 'Ask the Tester in the builder thread, or send a request from the Preview tab.',
 		type: 'info',
 	});
 }
 
-/** Real export: the judged pairs as JSON — trigger, outputs, verdicts, reasons, corrections. */
+/** Real export: requests, answers, and the judgments attached to them. */
 function onExport() {
 	connectMenuOpen.value = false;
-	const payload = JSON.stringify(store.records, null, 2);
-	const blob = new Blob([payload], { type: 'application/json' });
+	const payload = results.value.map((result) => ({
+		request: requestOf(result),
+		answer: answerOf(result),
+		rating: ratingOf(result) ?? undefined,
+	}));
+	const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
 	const url = URL.createObjectURL(blob);
 	const link = document.createElement('a');
 	link.href = url;
-	link.download = `outputs-${store.currentWorkflowId ?? 'workflow'}.json`;
+	link.download = `agent-outputs-${props.agentId}.json`;
 	link.click();
 	URL.revokeObjectURL(url);
 }
+
+onMounted(async () => {
+	try {
+		await store.fetchDatasets(props.projectId, props.agentId);
+		const current = dataset.value;
+		if (!current) return;
+		if (isDataTableDataset(current)) {
+			const source = toCaseSource(current);
+			if (source) await store.fetchCases(props.projectId, source).catch(() => null);
+		}
+		const latest = await store.resolveLatestRunId(props.projectId, props.agentId, current.id);
+		if (!latest) return;
+		runId.value = latest;
+		await store.openRun(props.projectId, props.agentId, latest);
+		if (store.isRunInFlight(latest)) {
+			store.startPollingRun(props.projectId, props.agentId, latest);
+		}
+	} catch {
+		// The empty state covers it.
+	} finally {
+		loading.value = false;
+	}
+});
+
+onBeforeUnmount(() => store.stopPollingRun());
 </script>
 
 <template>
-	<div :class="$style.view" data-test-id="workflow-outputs-view">
+	<div :class="$style.view" data-testid="agent-outputs-view">
 		<div :class="$style.headerRow">
 			<span :class="$style.title">Outputs</span>
 			<span :class="$style.headerActions">
@@ -117,12 +140,12 @@ function onExport() {
 					</button>
 					<span v-if="connectMenuOpen" :class="$style.menu">
 						<button :class="$style.menuOption" @click="onExport">
-							<span :class="$style.menuName">Export judged outputs</span>
-							<span :class="$style.menuHint">JSON of trigger, outputs, verdicts, corrections</span>
+							<span :class="$style.menuName">Export judged answers</span>
+							<span :class="$style.menuHint">JSON of requests, answers, verdicts</span>
 						</button>
 						<span :class="$style.menuOption">
 							<span :class="$style.menuName">n8n LangTracer</span>
-							<span :class="$style.menuHint">watches new outputs · zero setup — not wired yet</span>
+							<span :class="$style.menuHint">watches new answers · zero setup — not wired yet</span>
 						</span>
 						<span :class="$style.menuOption">
 							<span :class="$style.menuName">LangSmith</span>
@@ -136,51 +159,50 @@ function onExport() {
 						</span>
 					</span>
 				</span>
-				<button
-					:class="$style.primaryButton"
-					data-test-id="outputs-try-new-case"
-					@click="onTryNewCase"
-				>
+				<button :class="$style.primaryButton" data-testid="agent-outputs-try" @click="onTryNewCase">
 					Try a new case
 				</button>
 			</span>
 		</div>
 
-		<div v-if="groups.length === 0" :class="$style.empty">
-			Run the workflow — every output it produces lands here, with your judgments attached.
+		<div v-if="loading" :class="$style.empty">Loading…</div>
+		<div v-else-if="results.length === 0" :class="$style.empty">
+			Nothing here yet — try the agent on the Preview stage, or let the Tester have a go. Judged
+			replies land here.
 		</div>
 
 		<div v-else :class="$style.list">
-			<div v-for="group in groups" :key="group.key" :class="$style.group">
+			<div v-for="result in results" :key="result.id" :class="$style.group">
 				<div :class="$style.groupRow">
-					<span :class="$style.railLabel">Trigger</span>
+					<span :class="$style.railLabel">Request</span>
 					<span :class="$style.triggerChip">
-						<N8nIcon icon="file-text" size="medium" />
-						<span :class="$style.triggerText">{{ group.triggerSummary ?? 'Manual run' }}</span>
+						<N8nIcon icon="message-circle" size="medium" />
+						<span :class="$style.triggerText">{{ requestOf(result) }}</span>
 					</span>
 				</div>
 
 				<div :class="$style.groupRow">
 					<span :class="$style.railLabel">Outputs</span>
-					<div :class="$style.outputsColumns">
-						<div v-for="record in group.outputs" :key="record.id" :class="$style.outputColumn">
-							<span :class="$style.outputHeader">
-								<NodeIcon :node-type="nodeTypesStore.getNodeType(record.nodeType)" :size="16" />
-								<span :class="$style.outputName">{{ outputTitle(record) }}</span>
-							</span>
-							<span :class="$style.outputText">{{ outputText(record) }}</span>
-						</div>
+					<div :class="$style.outputColumn">
+						<span :class="$style.outputHeader">
+							<N8nIcon icon="bot" size="medium" />
+							<span :class="$style.outputName">{{ agentDisplayName }}</span>
+						</span>
+						<span :class="$style.outputText">{{ answerOf(result) }}</span>
 					</div>
 				</div>
 
 				<div :class="$style.groupRow">
 					<span :class="$style.railLabel">Tried by</span>
 					<span :class="$style.triedBy">
-						<N8nTooltip v-if="groupJudged(group)" placement="top">
-							<template #content>
-								<span :class="$style.verdictTooltip">{{ groupVerdictSummary(group) }}</span>
-							</template>
-							<span :class="$style.avatarRing">
+						<N8nTooltip v-if="ratingOf(result)" placement="top">
+							<template #content>{{ verdictTooltip(result) }}</template>
+							<span
+								:class="[
+									$style.avatarRing,
+									ratingOf(result)?.vote === 'down' && $style.avatarRingDown,
+								]"
+							>
 								<N8nAvatar
 									:first-name="usersStore.currentUser?.firstName ?? 'You'"
 									:last-name="usersStore.currentUser?.lastName ?? ''"
@@ -196,24 +218,21 @@ function onExport() {
 					<span :class="$style.improveWrapper">
 						<button
 							:class="$style.ghostButton"
-							@click="openImproveKey = openImproveKey === group.key ? null : group.key"
+							@click="openImproveId = openImproveId === result.id ? null : result.id"
 						>
 							Improve
 						</button>
-						<span v-if="openImproveKey === group.key" :class="$style.menu">
+						<span v-if="openImproveId === result.id" :class="$style.menu">
 							<span :class="$style.menuOption">
-								<span :class="$style.menuName">Ask the assistant to improve</span>
+								<span :class="$style.menuName">Ask the Builder to fix it</span>
 								<span :class="$style.menuHint"
-									>hands the outputs and your reasons over — not wired yet</span
+									>a 👎 with a reason on the stage does this — the Builder proposes an instruction
+									change</span
 								>
-							</span>
-							<span :class="$style.menuOption">
-								<span :class="$style.menuName">Open in the editor</span>
-								<span :class="$style.menuHint">not wired yet</span>
 							</span>
 						</span>
 					</span>
-					<button :class="$style.iconButton" title="Copy outputs" @click="onCopy(group)">
+					<button :class="$style.iconButton" title="Copy answer" @click="onCopy(result)">
 						<N8nIcon icon="copy" size="small" />
 					</button>
 					<button :class="$style.iconButton" title="Share — not wired yet">
@@ -223,17 +242,15 @@ function onExport() {
 			</div>
 		</div>
 
-		<div :class="$style.drip">
+		<div v-if="untriedCases.length > 0" :class="$style.drip">
 			<span :class="$style.dripTitle">Cases not yet tried:</span>
 			<span :class="$style.dripChips">
-				<span :class="$style.dripChip" title="Drafted cases aren't wired on the workflow side yet"
-					>Try: an invoice with two clients on it</span
-				>
-				<span :class="$style.dripChip" title="Drafted cases aren't wired on the workflow side yet"
-					>Try: an amount over €10,000</span
-				>
-				<span :class="$style.dripChip" title="Drafted cases aren't wired on the workflow side yet"
-					>Try: a missing due date</span
+				<span
+					v-for="candidate in untriedCases"
+					:key="candidate.rowId"
+					:class="$style.dripChip"
+					:title="'Try it from the Preview tab or ask the Tester in the builder thread'"
+					>Try: {{ candidate.input }}</span
 				>
 			</span>
 		</div>
@@ -242,18 +259,11 @@ function onExport() {
 
 <style lang="scss" module>
 .view {
-	position: fixed;
-	inset: 0;
-	top: var(--navbar--height, 65px);
-	/* Below the header's floating tab bar (z 100), above the canvas */
-	z-index: 50;
 	display: flex;
 	flex-direction: column;
 	gap: var(--spacing--sm);
-	/* The header's floating segment control protrudes below the navbar */
-	padding: var(--spacing--xl) var(--spacing--lg) var(--spacing--md);
-	background: var(--color--background);
-	overflow-y: auto;
+	width: 100%;
+	padding-bottom: var(--spacing--lg);
 }
 
 .headerRow {
@@ -400,7 +410,7 @@ button.menuOption {
 }
 
 .railLabel {
-	flex: 0 0 200px;
+	flex: 0 0 120px;
 	font-size: var(--font-size--2xs);
 	color: var(--color--text);
 	padding-top: var(--spacing--4xs);
@@ -408,7 +418,7 @@ button.menuOption {
 
 .triggerChip {
 	display: inline-flex;
-	align-items: center;
+	align-items: flex-start;
 	gap: var(--spacing--2xs);
 	border: var(--border);
 	border-radius: var(--radius);
@@ -419,13 +429,8 @@ button.menuOption {
 .triggerText {
 	font-size: var(--font-size--xs);
 	color: var(--color--text);
-}
-
-.outputsColumns {
-	flex: 1;
-	min-width: 0;
-	display: flex;
-	gap: var(--spacing--xl);
+	line-height: 1.5;
+	overflow-wrap: anywhere;
 }
 
 .outputColumn {
@@ -442,6 +447,7 @@ button.menuOption {
 	gap: var(--spacing--2xs);
 	padding-bottom: var(--spacing--3xs);
 	border-bottom: var(--border);
+	color: var(--color--text);
 }
 
 .outputName {
@@ -456,7 +462,7 @@ button.menuOption {
 	line-height: 1.5;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	max-height: 200px;
+	max-height: 220px;
 	overflow-y: auto;
 }
 
@@ -471,8 +477,8 @@ button.menuOption {
 	box-shadow: 0 0 0 2px var(--color--success);
 }
 
-.verdictTooltip {
-	white-space: pre-line;
+.avatarRingDown {
+	box-shadow: 0 0 0 2px var(--color--warning);
 }
 
 .notTried {
@@ -529,5 +535,9 @@ button.menuOption {
 	font-size: var(--font-size--2xs);
 	color: var(--color--text);
 	cursor: default;
+	max-width: 420px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 </style>
