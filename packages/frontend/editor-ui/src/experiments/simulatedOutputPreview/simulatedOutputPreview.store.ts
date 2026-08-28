@@ -90,6 +90,33 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		return stacks.value[nodeName]?.length ?? 0;
 	}
 
+	/** What the output says, regardless of destination kind */
+	function outputText(preview: SimulatedPreview): string {
+		return ((preview.kind === 'slack' ? preview.messageText : preview.body) ?? '').trim();
+	}
+
+	/**
+	 * The baseline for change comparisons: the newest output of this node the
+	 * user approved. A correction counts as what they approved.
+	 */
+	function lastApprovedFor(nodeName: string, excludeId?: string): OutputRecord | null {
+		for (let index = records.value.length - 1; index >= 0; index--) {
+			const record = records.value[index];
+			if (record.nodeName === nodeName && record.verdict === 'up' && record.id !== excludeId) {
+				return record;
+			}
+		}
+		return null;
+	}
+
+	/** True when the preview's text differs from the last approved output */
+	function changedSinceApproved(preview: SimulatedPreview): boolean {
+		const baseline = lastApprovedFor(preview.nodeName, preview.id);
+		if (!baseline) return false;
+		const approvedText = (baseline.correction ?? outputText(baseline)).trim();
+		return approvedText !== outputText(preview);
+	}
+
 	function setWorkflow(workflowId: string | null) {
 		if (workflowId === currentWorkflowId.value) return;
 		currentWorkflowId.value = workflowId;
@@ -226,6 +253,8 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		outputsTabOpen,
 		setWorkflow,
 		stackCount,
+		lastApprovedFor,
+		changedSinceApproved,
 		startRun,
 		setGenerating,
 		cancelPill,

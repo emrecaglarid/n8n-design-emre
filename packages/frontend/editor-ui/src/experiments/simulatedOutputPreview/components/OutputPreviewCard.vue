@@ -4,7 +4,11 @@ import { N8nIcon } from '@n8n/design-system';
 import NodeIcon from '@/app/components/NodeIcon.vue';
 import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { GOOGLE_GMAIL_NODE_TYPE } from '@/app/constants/nodeTypes';
-import type { SimulatedPreview, PreviewVerdict } from '../simulatedOutputPreview.store';
+import type {
+	OutputRecord,
+	SimulatedPreview,
+	PreviewVerdict,
+} from '../simulatedOutputPreview.store';
 import SlackMessagePreview from './SlackMessagePreview.vue';
 import EmailPreview from './EmailPreview.vue';
 import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
@@ -12,6 +16,8 @@ import type { PreviewDestination } from '@/experiments/destinationPreviews/surfa
 
 const props = defineProps<{
 	preview: SimulatedPreview;
+	/** When set, the output changed since this approved one: render side by side */
+	baseline?: OutputRecord | null;
 }>();
 
 const emit = defineEmits<{
@@ -33,11 +39,22 @@ const destination = ref<PreviewDestination>({ kind: 'preview' });
 const honestyChip = computed(() =>
 	destination.value.kind === 'test' ? 'Draft — nothing external' : 'Preview only',
 );
+
+const baselineText = computed(() => {
+	if (!props.baseline) return '';
+	const original =
+		(props.baseline.kind === 'slack' ? props.baseline.messageText : props.baseline.body) ?? '';
+	return props.baseline.correction ?? original;
+});
+
+const newText = computed(
+	() => (props.preview.kind === 'slack' ? props.preview.messageText : props.preview.body) ?? '',
+);
 </script>
 
 <template>
 	<div
-		:class="$style.card"
+		:class="[$style.card, baseline && $style.cardWide]"
 		:data-simulated-preview-card="preview.id"
 		data-test-id="simulated-output-card"
 	>
@@ -49,7 +66,17 @@ const honestyChip = computed(() =>
 				<N8nIcon icon="x" size="small" />
 			</button>
 		</div>
-		<div :class="$style.body">
+		<div v-if="baseline" :class="$style.compareBody" data-test-id="simulated-output-compare">
+			<div :class="[$style.comparePane, $style.comparePaneOld]">
+				<span :class="$style.compareLabel">Last approved output</span>
+				<span :class="$style.compareText">{{ baselineText }}</span>
+			</div>
+			<div :class="$style.comparePane">
+				<span :class="$style.compareLabel">New output</span>
+				<span :class="$style.compareText">{{ newText }}</span>
+			</div>
+		</div>
+		<div v-else :class="$style.body">
 			<SlackMessagePreview
 				v-if="preview.kind === 'slack'"
 				:channel="preview.channel"
@@ -180,6 +207,47 @@ const honestyChip = computed(() =>
 
 .body {
 	padding: var(--spacing--xs);
+}
+
+.cardWide {
+	width: 720px;
+}
+
+.compareBody {
+	display: flex;
+	gap: var(--spacing--2xs);
+	padding: var(--spacing--xs);
+}
+
+.comparePane {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing--3xs);
+	border: var(--border);
+	border-radius: var(--radius);
+	padding: var(--spacing--2xs) var(--spacing--xs);
+}
+
+.comparePaneOld {
+	background: var(--color--background);
+}
+
+.compareLabel {
+	font-size: var(--font-size--3xs);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text--tint-1);
+}
+
+.compareText {
+	font-size: var(--font-size--xs);
+	color: var(--color--text);
+	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 180px;
+	overflow-y: auto;
 }
 
 .footer {

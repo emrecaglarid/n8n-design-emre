@@ -24,7 +24,18 @@ const pillLabel = computed(() =>
 	store.pillPhase === 'generating' ? 'Generating outputs…' : 'Running nodes…',
 );
 
+/** The compare baseline for a preview: only when the output actually changed */
+function baselineFor(preview: SimulatedPreview) {
+	if (!store.changedSinceApproved(preview)) return null;
+	return store.lastApprovedFor(preview.nodeName, preview.id);
+}
+
 const outputsSubtitle = computed(() => {
+	const changed = store.previews.filter((preview) => store.changedSinceApproved(preview)).length;
+	if (changed > 0) {
+		const same = store.runOutputsTotal - changed;
+		return `${same} look${same === 1 ? 's' : ''} right · ${changed} changed since you approved ${changed === 1 ? 'it' : 'them'}`;
+	}
 	const count = store.runOutputsTotal;
 	return `Workflow generated ${count} output${count === 1 ? '' : 's'}`;
 });
@@ -148,6 +159,7 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 						v-if="store.frontPreview"
 						:key="store.frontPreview.id"
 						:preview="store.frontPreview"
+						:baseline="baselineFor(store.frontPreview)"
 						@verdict="onVerdict(store.frontPreview, $event)"
 						@close="onClose(store.frontPreview)"
 					/>
@@ -157,6 +169,7 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 						v-for="preview in store.previews"
 						:key="preview.id"
 						:preview="preview"
+						:baseline="baselineFor(preview)"
 						@verdict="onVerdict(preview, $event)"
 						@close="onClose(preview)"
 					/>
