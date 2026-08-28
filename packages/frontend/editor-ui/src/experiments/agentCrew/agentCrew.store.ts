@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
 
+import { useRootStore } from '@n8n/stores/useRootStore';
+
 import { useAgentEvalsStore } from '@/features/agents/agentEvals.store';
 import { useAgentChatStream } from '@/features/agents/composables/useAgentChatStream';
+import { getAgentConfig, updateAgentConfig } from '@/features/agents/composables/useAgentApi';
 import { isDataTableDataset, toCaseSource } from '@/features/agents/utils/agentEvalCases.utils';
 
 /**
@@ -74,11 +77,34 @@ export interface TesterSuggestion {
 	whatToCheck: string;
 }
 
+/**
+ * A verdict on the stage turned into a proposed instruction change. Apply is
+ * real: the line is written into the agent's instructions and the same
+ * request replays through a fresh session so before/after is a true diff.
+ * Only the wording of the proposed line is templated from the reason.
+ */
+export interface FixProposal {
+	id: string;
+	reason: string;
+	request: string;
+	beforeReply: string;
+	addedLine: string;
+	status: 'proposed' | 'applying' | 'replaying' | 'done' | 'skipped' | 'error';
+	afterReply: string;
+}
+
+export type CrewFeedItem =
+	| { id: string; kind: 'system'; text: string }
+	| { id: string; kind: 'verdict'; text: string }
+	| { id: string; kind: 'finding'; finding: TesterFinding }
+	| { id: string; kind: 'proposal'; proposal: FixProposal };
+
 interface AgentCrewState {
 	activeMemberIds: string[];
-	findings: TesterFinding[];
+	feed: CrewFeedItem[];
 	testerStatus: 'idle' | 'probing';
 	stagedFindingId: string | null;
+	stagedProposalId: string | null;
 	/** rowIds of cases the tester already tried, so reruns pick fresh ones */
 	probedRowIds: number[];
 	/** The Tester introduced itself and offered things to try */
@@ -87,12 +113,19 @@ interface AgentCrewState {
 	loadingSuggestions: boolean;
 }
 
+const MEMBER_JOIN_EVENTS: Record<string, string> = {
+	anna: '🧑 Anna joined — she was asked first',
+	intercom: '🔌 Intercom connected — real requests, replayed here, never answered live',
+	'external-agent': '🛰️ External agent connected via MCP — joins as a checker',
+};
+
 function emptyState(): AgentCrewState {
 	return {
 		activeMemberIds: ['builder', 'tester'],
-		findings: [],
+		feed: [],
 		testerStatus: 'idle',
 		stagedFindingId: null,
+		stagedProposalId: null,
 		probedRowIds: [],
 		greetingShown: false,
 		suggestions: [],
@@ -121,7 +154,12 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 
 	function addMember(agentId: string, memberId: string) {
 		const state = stateFor(agentId);
-		if (!state.activeMemberIds.includes(memberId)) state.activeMemberIds.push(memberId);
+		if (state.activeMemberIds.includes(memberId)) return;
+		state.activeMemberIds.push(memberId);
+		const eventText = MEMBER_JOIN_EVENTS[memberId];
+		if (eventText) {
+			state.feed.push({ id: crypto.randomUUID(), kind: 'system', text: eventText });
+		}
 	}
 
 	function removeMember(agentId: string, memberId: string) {
@@ -131,16 +169,39 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		state.activeMemberIds = state.activeMemberIds.filter((id) => id !== memberId);
 	}
 
-	const getFindings = computed(() => (agentId: string) => stateFor(agentId).findings);
+	const getFeed = computed(() => (agentId: string) => stateFor(agentId).feed);
 	const getTesterStatus = computed(() => (agentId: string) => stateFor(agentId).testerStatus);
 
 	const getStagedFinding = computed(() => (agentId: string) => {
 		const state = stateFor(agentId);
-		return state.findings.find((finding) => finding.id === state.stagedFindingId) ?? null;
+		for (const item of state.feed) {
+			if (item.kind === 'finding' && item.finding.id === state.stagedFindingId) {
+				return item.finding;
+			}
+		}
+		return null;
+	});
+
+	const getStagedProposal = computed(() => (agentId: string) => {
+		const state = stateFor(agentId);
+		for (const item of state.feed) {
+			if (item.kind === 'proposal' && item.proposal.id === state.stagedProposalId) {
+				return item.proposal;
+			}
+		}
+		return null;
 	});
 
 	function stageFinding(agentId: string, findingId: string | null) {
-		stateFor(agentId).stagedFindingId = findingId;
+		const state = stateFor(agentId);
+		state.stagedFindingId = findingId;
+		if (findingId !== null) state.stagedProposalId = null;
+	}
+
+	function stageProposal(agentId: string, proposalId: string | null) {
+		const state = stateFor(agentId);
+		state.stagedProposalId = proposalId;
+		if (proposalId !== null) state.stagedFindingId = null;
 	}
 
 	const getGreetingShown = computed(() => (agentId: string) => stateFor(agentId).greetingShown);
@@ -216,23 +277,100 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 			whatToCheck: suggestion.whatToCheck,
 			status: 'probing',
 		});
-		state.findings.push(finding);
+		state.feed.push({ id: finding.id, kind: 'finding', finding });
 		try {
-			const chat = useAgentChatStream({
-				projectId: ref(projectId),
-				agentId: ref(agentId),
-				continueSessionId: ref(crypto.randomUUID()),
-			});
-			await chat.sendMessage(suggestion.input);
-			const reply = [...chat.messages.value]
-				.reverse()
-				.find((message) => message.role === 'assistant' && message.content);
-			finding.reply = reply?.content ?? '';
-			finding.status = reply && reply.status !== 'error' ? 'done' : 'error';
+			finding.reply = await runThrowawayExchange(projectId, agentId, suggestion.input);
+			finding.status = finding.reply ? 'done' : 'error';
 		} catch {
 			finding.status = 'error';
 		} finally {
 			state.testerStatus = 'idle';
+		}
+	}
+
+	/** One request through a fresh, throwaway session; returns the reply text. */
+	async function runThrowawayExchange(
+		projectId: string,
+		agentId: string,
+		input: string,
+	): Promise<string> {
+		const chat = useAgentChatStream({
+			projectId: ref(projectId),
+			agentId: ref(agentId),
+			continueSessionId: ref(crypto.randomUUID()),
+		});
+		await chat.sendMessage(input);
+		const reply = [...chat.messages.value]
+			.reverse()
+			.find((message) => message.role === 'assistant' && message.content);
+		return reply && reply.status !== 'error' ? reply.content : '';
+	}
+
+	/**
+	 * A 👎 with a reason on the stage lands here: the verdict shows in the
+	 * thread, and the Builder proposes turning the reason into an instruction.
+	 */
+	function reportStageVerdict(
+		agentId: string,
+		exchange: { request: string; reply: string; reason: string },
+	): void {
+		const state = stateFor(agentId);
+		state.feed.push({
+			id: crypto.randomUUID(),
+			kind: 'verdict',
+			text: exchange.reason,
+		});
+		const trimmed = exchange.reason.trim().replace(/[.。]\s*$/, '');
+		const proposal = reactive<FixProposal>({
+			id: crypto.randomUUID(),
+			reason: exchange.reason,
+			request: exchange.request,
+			beforeReply: exchange.reply,
+			addedLine: trimmed.charAt(0).toUpperCase() + trimmed.slice(1),
+			status: 'proposed',
+			afterReply: '',
+		});
+		state.feed.push({ id: proposal.id, kind: 'proposal', proposal });
+	}
+
+	/**
+	 * Apply is real: the proposed line is written into the agent's instructions,
+	 * then the same request replays through a fresh session for a true
+	 * before/after. Nothing here is simulated except the wording of the line.
+	 */
+	async function applyProposal(
+		projectId: string,
+		agentId: string,
+		proposalId: string,
+	): Promise<void> {
+		const state = stateFor(agentId);
+		const item = state.feed.find(
+			(entry) => entry.kind === 'proposal' && entry.proposal.id === proposalId,
+		);
+		if (!item || item.kind !== 'proposal' || item.proposal.status !== 'proposed') return;
+		const proposal = item.proposal;
+		proposal.status = 'applying';
+		try {
+			const context = useRootStore().restApiContext;
+			const config = await getAgentConfig(context, projectId, agentId);
+			const instructions = `${config.instructions ?? ''}\n- ${proposal.addedLine}`.trim();
+			await updateAgentConfig(context, projectId, agentId, { ...config, instructions });
+			proposal.status = 'replaying';
+			proposal.afterReply = await runThrowawayExchange(projectId, agentId, proposal.request);
+			proposal.status = proposal.afterReply ? 'done' : 'error';
+			if (proposal.status === 'done') stageProposal(agentId, proposal.id);
+		} catch {
+			proposal.status = 'error';
+		}
+	}
+
+	function skipProposal(agentId: string, proposalId: string): void {
+		const state = stateFor(agentId);
+		const item = state.feed.find(
+			(entry) => entry.kind === 'proposal' && entry.proposal.id === proposalId,
+		);
+		if (item?.kind === 'proposal' && item.proposal.status === 'proposed') {
+			item.proposal.status = 'skipped';
 		}
 	}
 
@@ -241,14 +379,19 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		getAddableMembers,
 		addMember,
 		removeMember,
-		getFindings,
+		getFeed,
 		getTesterStatus,
 		getStagedFinding,
+		getStagedProposal,
 		stageFinding,
+		stageProposal,
 		getGreetingShown,
 		getSuggestions,
 		getLoadingSuggestions,
 		showTesterGreeting,
 		probeSuggestion,
+		reportStageVerdict,
+		applyProposal,
+		skipProposal,
 	};
 });

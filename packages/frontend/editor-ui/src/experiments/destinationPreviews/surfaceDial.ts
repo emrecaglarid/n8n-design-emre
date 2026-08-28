@@ -20,6 +20,6 @@ export interface TestChannelOption {
 }
 
 export function destinationLabel(destination: PreviewDestination): string {
-	if (destination.kind === 'preview') return 'Preview';
-	return `${destination.private ? '🔒' : '#'} ${destination.channel}`;
+	if (destination.kind === 'preview') return 'Preview only';
+	return `Send to ${destination.private ? '🔒' : '#'}${destination.channel}`;
 }

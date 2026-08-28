@@ -61,9 +61,19 @@ const channelName = computed(() =>
 	destination.value.kind === 'test' ? destination.value.channel : 'client-requests',
 );
 
-// ── Tester probes staged from the crew panel ─────────────────────────────────
+// ── Audience: who can see this preview. Visual state only — sharing the
+//    session isn't wired, and the menu says so. ──────────────────────────────
+const audience = ref<'you' | 'team'>('you');
+const audienceMenuOpen = ref(false);
+function pickAudience(value: 'you' | 'team') {
+	audience.value = value;
+	audienceMenuOpen.value = false;
+}
+
+// ── Tester probes and fix replays staged from the crew panel ─────────────────
 const crew = useAgentCrewStore();
 const stagedFinding = computed(() => crew.getStagedFinding(props.agentId));
+const stagedProposal = computed(() => crew.getStagedProposal(props.agentId));
 
 const displayMessages = computed(() =>
 	chat.messages.value.filter((message) => {
@@ -86,7 +96,7 @@ const caseSource = computed(() => {
 const cases = computed(() => (dataset.value ? store.getCases(dataset.value.id) : []));
 const usedChipRowIds = ref<Set<number>>(new Set());
 const chipCases = computed(() =>
-	cases.value.filter((candidate) => !usedChipRowIds.value.has(candidate.rowId)).slice(0, 3),
+	cases.value.filter((candidate) => !usedChipRowIds.value.has(candidate.rowId)).slice(0, 2),
 );
 
 const suggesting = ref(false);
@@ -166,9 +176,23 @@ function onVote(vote: 'up' | 'down') {
 }
 
 async function saveReason() {
-	if (!reasonText.value.trim()) return;
+	const reason = reasonText.value.trim();
+	if (!reason) return;
 	showReason.value = false;
-	await captureExchange(reasonText.value.trim());
+	// The verdict has a consequence: it lands in the builder thread, where the
+	// Builder turns the reason into a proposed instruction change.
+	const exchange = lastExchange.value;
+	const lastReply = [...displayMessages.value]
+		.reverse()
+		.find((message) => message.role === 'assistant' && message.content);
+	if (exchange && lastReply) {
+		crew.reportStageVerdict(props.agentId, {
+			request: exchange.text,
+			reply: lastReply.content,
+			reason,
+		});
+	}
+	await captureExchange(reason);
 	reasonText.value = '';
 }
 
@@ -176,6 +200,11 @@ function cancelReason() {
 	showReason.value = false;
 	reasonText.value = '';
 	votedVote.value = null;
+}
+
+/** The replay looked right: unstage it and get back to the session. */
+function onKeepFix() {
+	crew.stageProposal(props.agentId, null);
 }
 
 async function captureExchange(whatToCheck: string) {
@@ -256,6 +285,22 @@ onMounted(() => {
 		<template v-else>
 			<div :class="$style.stageToolbar">
 				<DestinationDropdown v-model="destination" dark />
+				<div :class="$style.audienceWrapper">
+					<button :class="$style.audienceTrigger" @click="audienceMenuOpen = !audienceMenuOpen">
+						{{ audience === 'you' ? 'Only you' : 'Team' }}
+						<span :class="$style.audienceChevron">▾</span>
+					</button>
+					<div v-if="audienceMenuOpen" :class="$style.audienceMenu">
+						<button :class="$style.audienceOption" @click="pickAudience('you')">
+							<span :class="$style.audienceName">Only you</span>
+							<span :class="$style.audienceHint">this preview stays private</span>
+						</button>
+						<button :class="$style.audienceOption" @click="pickAudience('team')">
+							<span :class="$style.audienceName">Team</span>
+							<span :class="$style.audienceHint">everyone in this project can watch and judge</span>
+						</button>
+					</div>
+				</div>
 			</div>
 
 			<div ref="windowWrapper" :class="$style.windowWrapper">
@@ -264,10 +309,30 @@ onMounted(() => {
 					:channel-name="channelName"
 					simulated-label=""
 					interactive
-					:send-disabled="chat.isStreaming.value || disabled || Boolean(stagedFinding)"
+					:send-disabled="chat.isStreaming.value || disabled"
 					@send="onSendDraft"
 				>
+					<div :class="$style.channelIntro">
+						This is the very beginning of <b>#{{ channelName }}</b
+						>. {{ agentDisplayName }} is here — say something to see how it responds.
+					</div>
+					<SlackMessage
+						v-for="message in displayMessages"
+						:key="message.id"
+						:author-name="message.role === 'user' ? 'You' : agentDisplayName"
+						:text="message.content"
+						:app-badge="message.role === 'assistant'"
+						:avatar-color="message.role === 'assistant' ? '#E8912D' : '#4A7DAB'"
+						:pending="message.status === 'streaming' && !message.content"
+						:error="message.status === 'error'"
+					/>
+
 					<template v-if="stagedFinding">
+						<div :class="$style.threadDivider">
+							<span :class="$style.dividerLine" />
+							<span :class="$style.dividerLabel">Tester's probe · separate session</span>
+							<span :class="$style.dividerLine" />
+						</div>
 						<SlackMessage
 							author-name="Tester · simulated user"
 							:text="stagedFinding.input"
@@ -283,20 +348,31 @@ onMounted(() => {
 							The Tester's question: {{ stagedFinding.whatToCheck }}
 						</div>
 					</template>
-					<template v-else>
-						<div :class="$style.channelIntro">
-							This is the very beginning of <b>#{{ channelName }}</b
-							>. {{ agentDisplayName }} is here — say something to see how it responds.
+
+					<template v-if="stagedProposal">
+						<div :class="$style.threadDivider">
+							<span :class="$style.dividerLine" />
+							<span :class="$style.dividerLabel">Before the fix</span>
+							<span :class="$style.dividerLine" />
+						</div>
+						<div :class="$style.dimmed">
+							<SlackMessage
+								:author-name="agentDisplayName"
+								:text="stagedProposal.beforeReply"
+								app-badge
+								avatar-color="#E8912D"
+							/>
+						</div>
+						<div :class="$style.threadDivider">
+							<span :class="$style.dividerLine" />
+							<span :class="$style.dividerLabel">Same request, replayed after the fix</span>
+							<span :class="$style.dividerLine" />
 						</div>
 						<SlackMessage
-							v-for="message in displayMessages"
-							:key="message.id"
-							:author-name="message.role === 'user' ? 'You' : agentDisplayName"
-							:text="message.content"
-							:app-badge="message.role === 'assistant'"
-							:avatar-color="message.role === 'assistant' ? '#E8912D' : '#4A7DAB'"
-							:pending="message.status === 'streaming' && !message.content"
-							:error="message.status === 'error'"
+							:author-name="agentDisplayName"
+							:text="stagedProposal.afterReply"
+							app-badge
+							avatar-color="#E8912D"
 						/>
 					</template>
 					<template #beforeComposer>
@@ -353,9 +429,9 @@ onMounted(() => {
 					</button>
 					<button
 						:class="[$style.looksGoodButton, votedVote === 'up' && $style.looksGoodSelected]"
-						:disabled="!canJudge"
+						:disabled="stagedProposal ? false : !canJudge"
 						data-testid="agent-preview-vote-up"
-						@click="onVote('up')"
+						@click="stagedProposal ? onKeepFix() : onVote('up')"
 					>
 						<svg
 							width="17"
@@ -372,7 +448,7 @@ onMounted(() => {
 								d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"
 							/>
 						</svg>
-						Looks good
+						{{ stagedProposal ? 'Fixed — keep it' : 'Looks good' }}
 					</button>
 				</div>
 			</div>
@@ -427,9 +503,106 @@ onMounted(() => {
 .stageToolbar {
 	display: flex;
 	align-items: center;
-	justify-content: flex-start;
+	justify-content: center;
+	gap: 10px;
 	width: 100%;
 	max-width: 680px;
+}
+
+.audienceWrapper {
+	position: relative;
+	display: inline-flex;
+}
+
+.audienceTrigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 12px;
+	border-radius: var(--radius--md);
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	font-size: 11px;
+	font-weight: var(--font-weight--bold);
+	color: rgba(255, 255, 255, 0.92);
+	cursor: pointer;
+	transition-property: scale;
+	transition-duration: 100ms;
+
+	&:active {
+		scale: 0.96;
+	}
+}
+
+.audienceChevron {
+	font-size: 9px;
+	opacity: 0.7;
+}
+
+.audienceMenu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	min-width: 240px;
+	padding: 4px;
+	background: var(--color--background--light-2, #fff);
+	border: 1px solid var(--color--foreground);
+	border-radius: var(--radius--lg);
+	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+}
+
+.audienceOption {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 1px;
+	padding: 7px 10px;
+	background: transparent;
+	border: none;
+	border-radius: var(--radius);
+	text-align: left;
+	cursor: pointer;
+
+	&:hover {
+		background: var(--color--background);
+	}
+}
+
+.audienceName {
+	font-size: 11px;
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text);
+}
+
+.audienceHint {
+	font-size: 10px;
+	color: var(--color--text--tint-1);
+}
+
+.threadDivider {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 4px 20px;
+}
+
+.dividerLine {
+	flex: 1;
+	height: 1px;
+	background: rgba(29, 28, 29, 0.13);
+}
+
+.dividerLabel {
+	flex-shrink: 0;
+	font-size: 11px;
+	color: #616061;
+}
+
+.dimmed {
+	opacity: 0.6;
 }
 
 .stagedCheckNote {
