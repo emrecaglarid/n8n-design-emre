@@ -1155,6 +1155,7 @@ async function dismissComposerContextChip() {
 						"
 						:project-id="preview.activeAgentProjectId.value"
 						:agent-id="preview.activeAgentId.value"
+						:agent-pending="preview.activeAgentPending.value || thread.isStreaming"
 					/>
 					<N8nScrollArea as-child type="auto" :class="$style.scrollArea">
 						<div ref="scrollable" :class="$style.scrollContent">

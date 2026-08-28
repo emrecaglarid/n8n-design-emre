@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { N8nTooltip } from '@n8n/design-system';
 
 import { useAgentCrewStore, type CrewMember } from './agentCrew.store';
@@ -13,9 +13,21 @@ import { useAgentCrewStore, type CrewMember } from './agentCrew.store';
 const props = defineProps<{
 	projectId: string;
 	agentId: string;
+	/** True while the Builder is still creating the agent */
+	agentPending?: boolean;
 }>();
 
 const crew = useAgentCrewStore();
+
+// The Tester only takes its seat once the agent exists — there is nothing to
+// try before that.
+watch(
+	() => [props.agentId, props.agentPending] as const,
+	([agentId, pending]) => {
+		if (agentId && pending === false) crew.ensureTester(agentId);
+	},
+	{ immediate: true },
+);
 
 const members = computed(() => crew.getActiveMembers(props.agentId));
 const addable = computed(() => crew.getAddableMembers(props.agentId));

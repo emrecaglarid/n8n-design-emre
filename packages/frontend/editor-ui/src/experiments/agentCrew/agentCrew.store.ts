@@ -121,7 +121,9 @@ const MEMBER_JOIN_EVENTS: Record<string, string> = {
 
 function emptyState(): AgentCrewState {
 	return {
-		activeMemberIds: ['builder', 'tester'],
+		// The Tester joins only once the Builder has created the agent — see
+		// ensureTester().
+		activeMemberIds: ['builder'],
 		feed: [],
 		testerStatus: 'idle',
 		stagedFindingId: null,
@@ -160,6 +162,14 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		if (eventText) {
 			state.feed.push({ id: crypto.randomUUID(), kind: 'system', text: eventText });
 		}
+	}
+
+	/** The agent exists now: the Tester takes its seat, announced in the thread. */
+	function ensureTester(agentId: string) {
+		const state = stateFor(agentId);
+		if (state.activeMemberIds.includes('tester')) return;
+		state.activeMemberIds.push('tester');
+		state.feed.push({ id: crypto.randomUUID(), kind: 'system', text: '🤖 Tester joined' });
 	}
 
 	function removeMember(agentId: string, memberId: string) {
@@ -378,6 +388,7 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		getActiveMembers,
 		getAddableMembers,
 		addMember,
+		ensureTester,
 		removeMember,
 		getFeed,
 		getTesterStatus,
