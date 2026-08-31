@@ -28,6 +28,7 @@ import { PROJECT_AGENTS } from '@/features/agents/constants';
 import { instanceAiCreateAgentRoute } from '@/features/ai/instanceAi/createAgentRoute';
 
 import AgentPublishButton from './AgentPublishButton.vue';
+import VariantMenu from '@/experiments/variants/VariantMenu.vue';
 import AgentValidationTooltip from './AgentValidationTooltip.vue';
 import { useProjectAgentsList } from '../composables/useProjectAgentsList';
 import type { AgentBuilderMainTab } from '../composables/useAgentBuilderMainTabs';
@@ -202,6 +203,8 @@ const isVersionHistoryDisabled = computed(() => !props.agent?.hasPublishHistory)
 			/>
 		</div>
 		<div :class="$style.right">
+			<!-- AI Trust prototype: switch between design directions in place -->
+			<VariantMenu />
 			<span
 				v-if="saveStatus === 'saving' || saveStatus === 'saved'"
 				:class="$style.saveStatus"

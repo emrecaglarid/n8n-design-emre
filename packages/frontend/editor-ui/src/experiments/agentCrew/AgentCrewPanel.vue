@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { scopeLabel } from '@/experiments/findings/findings';
+
 import { useAgentCrewStore } from './agentCrew.store';
 
 /**
@@ -71,19 +73,24 @@ function truncate(text: string, max = 140): string {
 			</div>
 
 			<div v-else-if="item.kind === 'verdict'" :class="$style.verdictWrap">
-				<span :class="$style.verdictBubble">👎 {{ item.text }}</span>
+				<span :class="$style.verdictBubble">
+					<span v-if="item.finding.scope.kind !== 'whole'" :class="$style.scopeTag">{{
+						scopeLabel(item.finding.scope)
+					}}</span>
+					👎 {{ item.finding.body.reason }}
+				</span>
 			</div>
 
 			<div v-else-if="item.kind === 'finding'" :class="$style.message">
 				<span :class="[$style.avatar, $style.testerAvatar]">T</span>
 				<span :class="$style.body">
 					<span :class="[$style.author, $style.testerAuthor]">Tester</span>
-					<template v-if="item.finding.status === 'probing'">
+					<template v-if="item.finding.progress === 'probing'">
 						<span :class="$style.text"
 							>Trying “{{ truncate(item.finding.input, 90) }}” in the preview…</span
 						>
 					</template>
-					<template v-else-if="item.finding.status === 'error'">
+					<template v-else-if="item.finding.progress === 'error'">
 						<span :class="$style.text"
 							>I tried “{{ truncate(item.finding.input, 90) }}” but didn't get a reply.</span
 						>
@@ -222,6 +229,14 @@ function truncate(text: string, max = 140): string {
 	flex-direction: column;
 	gap: 3px;
 	max-width: 85%;
+}
+
+.scopeTag {
+	display: block;
+	margin-bottom: var(--spacing--4xs);
+	font-size: var(--font-size--2xs);
+	color: var(--color--text--tint-1);
+	overflow-wrap: anywhere;
 }
 
 .verdictBubble {

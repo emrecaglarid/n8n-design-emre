@@ -17,6 +17,7 @@ import { useFoldersStore } from '@/features/core/folders/folders.store';
 import type { PathItem } from '@n8n/design-system';
 import ActionsDropdownMenu from '@/app/components/MainHeader/ActionsDropdownMenu.vue';
 import WorkflowHeaderDraftPublishActions from '@/app/components/MainHeader/WorkflowHeaderDraftPublishActions.vue';
+import VariantMenu from '@/experiments/variants/VariantMenu.vue';
 import { useI18n } from '@n8n/i18n';
 import { getResourcePermissions } from '@n8n/permissions';
 import {
@@ -392,6 +393,9 @@ onBeforeUnmount(() => {
 			</span>
 		</span>
 
+		<!-- AI Trust prototype: switch between design directions in place -->
+		<VariantMenu :class="$style['variant-menu']" />
+
 		<ConnectionTracker class="actions">
 			<WorkflowHeaderDraftPublishActions
 				:id="id"
@@ -449,6 +453,12 @@ $--header-spacing: 20px;
 </style>
 
 <style module lang="scss">
+/* AI Trust prototype: sits left of the publish actions, out of their way */
+.variant-menu {
+	flex-shrink: 0;
+	margin-right: var(--spacing--2xs);
+}
+
 .container {
 	position: relative;
 	width: 100%;

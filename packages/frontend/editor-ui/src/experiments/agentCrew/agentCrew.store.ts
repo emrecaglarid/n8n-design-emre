@@ -6,6 +6,12 @@ import { useRootStore } from '@n8n/stores/useRootStore';
 import { useAgentEvalsStore } from '@/features/agents/agentEvals.store';
 import { getAgentConfig, updateAgentConfig } from '@/features/agents/composables/useAgentApi';
 import { isDataTableDataset, toCaseSource } from '@/features/agents/utils/agentEvalCases.utils';
+import {
+	FINDING_SOURCES,
+	createFinding,
+	type Finding,
+	type FindingScope,
+} from '@/experiments/findings/findings';
 
 /**
  * AI Trust prototype: the crew checking an agent. The Builder and the Tester
@@ -27,12 +33,16 @@ export interface CrewMember {
 	fixed?: boolean;
 }
 
-export interface TesterFinding {
-	id: string;
+/**
+ * A tester probe is a Finding with the live state of the probe attached.
+ * `progress` is the request lifecycle; `status` (from Finding) is the verdict
+ * lifecycle — they are different things and both matter.
+ */
+export interface TesterFinding extends Finding {
 	input: string;
 	reply: string;
 	whatToCheck: string;
-	status: 'probing' | 'done' | 'error';
+	progress: 'probing' | 'done' | 'error';
 }
 
 export const CREW_CATALOGUE: CrewMember[] = [
@@ -105,10 +115,14 @@ export interface FixProposal {
 	afterReply: string;
 }
 
+/**
+ * The thread is a *renderer* over findings, not a data model of its own —
+ * every item that carries judgement carries a Finding.
+ */
 export type CrewFeedItem =
 	| { id: string; kind: 'system'; text: string }
 	| { id: string; kind: 'greeting' }
-	| { id: string; kind: 'verdict'; text: string }
+	| { id: string; kind: 'verdict'; finding: Finding }
 	| { id: string; kind: 'finding'; finding: TesterFinding }
 	| { id: string; kind: 'proposal'; proposal: FixProposal };
 
@@ -208,7 +222,8 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		for (const item of state.feed) {
 			if (item.kind === 'finding' && item.finding.id === send.findingId) {
 				item.finding.reply = reply;
-				item.finding.status = reply ? 'done' : 'error';
+				item.finding.output = reply;
+				item.finding.progress = reply ? 'done' : 'error';
 			}
 			if (item.kind === 'proposal' && item.proposal.id === send.proposalId) {
 				item.proposal.afterReply = reply;
@@ -282,11 +297,15 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 		state.suggestions = state.suggestions.filter((entry) => entry.rowId !== suggestion.rowId);
 		state.testerStatus = 'probing';
 		const finding = reactive<TesterFinding>({
-			id: crypto.randomUUID(),
+			...createFinding({
+				source: FINDING_SOURCES.tester,
+				body: { reason: suggestion.whatToCheck },
+				request: suggestion.input,
+			}),
 			input: suggestion.input,
 			reply: '',
 			whatToCheck: suggestion.whatToCheck,
-			status: 'probing',
+			progress: 'probing',
 		});
 		state.feed.push({ id: finding.id, kind: 'finding', finding });
 		state.pendingSends.push({
@@ -304,14 +323,25 @@ export const useAgentCrewStore = defineStore('experiments.agentCrew', () => {
 	 */
 	function reportStageVerdict(
 		agentId: string,
-		exchange: { request: string; reply: string; reason: string },
+		exchange: {
+			request: string;
+			reply: string;
+			reason: string;
+			/** Which part of the reply the verdict is about */
+			scope?: FindingScope;
+			/** What it should have said instead, when the user wrote one */
+			replacement?: string;
+		},
 	): void {
 		const state = stateFor(agentId);
-		state.feed.push({
-			id: crypto.randomUUID(),
-			kind: 'verdict',
-			text: exchange.reason,
+		const verdict = createFinding({
+			source: FINDING_SOURCES.human,
+			scope: exchange.scope,
+			body: { reason: exchange.reason, replacement: exchange.replacement },
+			request: exchange.request,
+			output: exchange.reply,
 		});
+		state.feed.push({ id: verdict.id, kind: 'verdict', finding: verdict });
 		const trimmed = exchange.reason.trim().replace(/[.。]\s*$/, '');
 		const proposal = reactive<FixProposal>({
 			id: crypto.randomUUID(),
