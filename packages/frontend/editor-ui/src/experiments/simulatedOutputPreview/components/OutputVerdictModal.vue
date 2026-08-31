@@ -26,14 +26,9 @@ import type { OutputVerdict, SimulatedPreview } from '../simulatedOutputPreview.
  * nothing selected a note is about the whole output, and selecting text in the
  * output scopes it to that span. One Save commits one verdict with N findings.
  */
-const props = withDefaults(
-	defineProps<{
-		preview: SimulatedPreview;
-		/** Which button was pressed, so the verdict starts where the user already is */
-		initialVerdict?: OutputVerdict;
-	}>(),
-	{ initialVerdict: 'not-right' },
-);
+const props = defineProps<{
+	preview: SimulatedPreview;
+}>();
 
 const emit = defineEmits<{
 	save: [
@@ -57,13 +52,86 @@ const title = computed(() => {
 	return props.preview.nodeType === GOOGLE_GMAIL_NODE_TYPE ? 'Gmail' : 'Email';
 });
 
-const REASON_CHIPS = ['Wrong data', 'Too long', 'Wrong tone', 'Off-brand', "Shouldn't send at all"];
+/**
+ * Chips do two different jobs, and the difference is deliberate.
+ *
+ * Where a chip names something we can genuinely act on, tapping it rewrites the
+ * output and hands the result back editable — the user steers instead of
+ * explaining, which is what the research says they actually do. Where a chip
+ * names a judgement no rule can carry out ("wrong tone"), it records the reason
+ * and nothing more. Faking a rewrite there would be inventing an opinion and
+ * attributing it to the system.
+ */
+interface ReasonChip {
+	label: string;
+	/** Present only when the rewrite is faithful to the label */
+	rewrite?: (text: string) => string;
+}
+
+const REASON_CHIPS: ReasonChip[] = [
+	{ label: 'Wrong data' },
+	{ label: 'Too long', rewrite: keepFirstSentences },
+	{ label: 'Drop the preamble', rewrite: dropGreeting },
+	{ label: 'Lose the emoji', rewrite: stripEmoji },
+	{ label: 'Wrong tone' },
+	{ label: "Shouldn't send at all" },
+];
+
+const DECIMAL_SENTINEL = '\u0000';
+
+/** Two sentences is the shortest that still carries a fact plus its ask. */
+function keepFirstSentences(text: string): string {
+	// A decimal point is not a sentence end — splitting on it turns €1,240.50
+	// into two sentences and mangles the number.
+	const guarded = text.replace(/(\d)\.(\d)/g, `$1${DECIMAL_SENTINEL}$2`);
+	const sentences = guarded.match(/[^.!?\n]+[.!?]?/g) ?? [];
+	const kept = sentences
+		.map((sentence) => sentence.trim())
+		.filter(Boolean)
+		.slice(0, 2);
+	const result = kept.length > 0 ? kept.join(' ') : guarded;
+	return result.replaceAll(DECIMAL_SENTINEL, '.');
+}
+
+/** Greetings and sign-offs are the preamble people mean. */
+function dropGreeting(text: string): string {
+	const lines = text.split('\n');
+	const kept = lines.filter(
+		(line) =>
+			!/^\s*(hi|hello|hey|dear|good (morning|afternoon))\b/i.test(line) &&
+			!/^\s*(best|thanks|regards|cheers)\b/i.test(line),
+	);
+	return (
+		kept
+			.join('\n')
+			.replace(/\n{3,}/g, '\n\n')
+			.trim() || text
+	);
+}
+
+/**
+ * Slack shortcodes and unicode emoji both count. A sentence built around a
+ * shortcode ("React with :white_check_mark: once reviewed") goes entirely —
+ * excising just the token leaves "React with once reviewed", which reads worse
+ * than the emoji did.
+ */
+function stripEmoji(text: string): string {
+	const guarded = text.replace(/(\d)\.(\d)/g, `$1${DECIMAL_SENTINEL}$2`);
+	const kept = (guarded.match(/[^.!?\n]+[.!?]?/g) ?? [])
+		.filter((sentence) => !/:[a-z0-9_+-]+:/i.test(sentence))
+		.map((sentence) => sentence.trim())
+		.filter(Boolean);
+	const base = kept.length > 0 ? kept.join(' ') : guarded;
+	return base
+		.replaceAll(DECIMAL_SENTINEL, '.')
+		.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+		.replace(/[ \t]{2,}/g, ' ')
+		.replace(/\s+([.,!?])/g, '$1')
+		.trim();
+}
 
 /** Scoping only exists when the annotation direction is on */
 const canScope = computed(() => variants.annotation === 'on');
-
-// ── The verdict, so a nitpick doesn't mark the whole output rejected ─────────
-const verdict = ref<OutputVerdict>(props.initialVerdict);
 
 // ── The output itself, editable (Model A') ───────────────────────────────────
 const originalText = computed(() =>
@@ -161,6 +229,36 @@ function findingCause(): FindingCause | undefined {
 
 // ── The composer: one box, scoped by the line above it ───────────────────────
 const selectedChip = ref<string | null>(null);
+/** Set while the output on screen came from a chip rather than the run */
+const suggestedFrom = ref<string | null>(null);
+/** What the output said before the suggestion, so it can be put back */
+const textBeforeSuggestion = ref<string | null>(null);
+
+function onChipClick(chip: ReasonChip) {
+	if (selectedChip.value === chip.label) {
+		selectedChip.value = null;
+		revertSuggestion();
+		return;
+	}
+	selectedChip.value = chip.label;
+	if (!chip.rewrite) return;
+	const source = textBeforeSuggestion.value ?? outputText.value;
+	const rewritten = chip.rewrite(source);
+	// A rewrite that changes nothing is not a suggestion.
+	if (rewritten.trim() === source.trim()) return;
+	textBeforeSuggestion.value = source;
+	outputText.value = rewritten;
+	suggestedFrom.value = chip.label;
+	clearScope();
+}
+
+function revertSuggestion() {
+	if (textBeforeSuggestion.value === null) return;
+	outputText.value = textBeforeSuggestion.value;
+	textBeforeSuggestion.value = null;
+	suggestedFrom.value = null;
+	clearScope();
+}
 const noteText = ref('');
 const findings = ref<Finding[]>([]);
 
@@ -187,6 +285,8 @@ async function onAddAnother() {
 	findings.value = [...findings.value, finding];
 	selectedChip.value = null;
 	noteText.value = '';
+	suggestedFrom.value = null;
+	textBeforeSuggestion.value = null;
 	clearScope();
 	await nextTick();
 }
@@ -194,6 +294,25 @@ async function onAddAnother() {
 function removeFinding(id: string) {
 	findings.value = findings.value.filter((finding) => finding.id !== id);
 }
+
+/**
+ * How wrong it was, derived rather than asked: notes that all point at parts
+ * of the output describe issues in it, while a note about the whole thing (or
+ * a rewrite with nothing pointed at) rejects it. Deriving it removes a control
+ * that could contradict the notes underneath it.
+ */
+const derivedVerdict = computed<OutputVerdict>(() => {
+	const all = [...findings.value];
+	if (composerHasContent.value) all.push({ scope: scope.value } as Finding);
+	if (all.length === 0) return 'not-right';
+	return all.every((finding) => finding.scope.kind !== 'whole') ? 'mostly-fine' : 'not-right';
+});
+
+const derivedVerdictText = computed(() =>
+	derivedVerdict.value === 'mostly-fine'
+		? 'Saved as: an issue in an otherwise fine output.'
+		: 'Saved as: this output was not right.',
+);
 
 // A bare thumbs down with nothing attached teaches nothing — but an edited
 // output is itself a signal, so it counts.
@@ -222,7 +341,7 @@ function onSave() {
 		.filter(Boolean)
 		.join(' · ');
 	emit('save', {
-		verdict: verdict.value,
+		verdict: derivedVerdict.value,
 		reason: reason || 'Corrected the output',
 		correction,
 		findings: all,
@@ -243,23 +362,6 @@ function onSave() {
 				</div>
 
 				<div :class="$style.body">
-					<div :class="$style.verdictSwitch" data-test-id="output-verdict-switch">
-						<button
-							:class="[$style.verdictOption, verdict === 'not-right' && $style.verdictActive]"
-							data-test-id="output-verdict-not-right"
-							@click="verdict = 'not-right'"
-						>
-							Not right
-						</button>
-						<button
-							:class="[$style.verdictOption, verdict === 'mostly-fine' && $style.verdictActive]"
-							data-test-id="output-verdict-mostly-fine"
-							@click="verdict = 'mostly-fine'"
-						>
-							Mostly fine, one issue
-						</button>
-					</div>
-
 					<div :class="$style.outputBox">
 						<template v-if="preview.kind === 'email'">
 							<div :class="$style.emailMeta">
@@ -285,7 +387,17 @@ function onSave() {
 							@mouseup="onOutputSelect"
 							@keyup="onOutputSelect"
 						/>
-						<span :class="$style.outputHint">
+						<span v-if="suggestedFrom" :class="$style.suggestedHint">
+							Suggested from “{{ suggestedFrom }}” — edit it, or
+							<button
+								:class="$style.revertLink"
+								data-test-id="output-verdict-revert"
+								@click="revertSuggestion"
+							>
+								put the original back</button
+							>.
+						</span>
+						<span v-else :class="$style.outputHint">
 							{{
 								canScope
 									? 'Edit it to what it should have said, or select part of it to comment on.'
@@ -336,11 +448,13 @@ function onSave() {
 					<div :class="$style.chipRow">
 						<button
 							v-for="chip in REASON_CHIPS"
-							:key="chip"
-							:class="[$style.chip, selectedChip === chip && $style.chipSelected]"
-							@click="selectedChip = selectedChip === chip ? null : chip"
+							:key="chip.label"
+							:class="[$style.chip, selectedChip === chip.label && $style.chipSelected]"
+							:data-test-id="`output-verdict-chip-${chip.label}`"
+							@click="onChipClick(chip)"
 						>
-							{{ chip }}
+							{{ chip.label }}
+							<span v-if="chip.rewrite" :class="$style.chipSteers">↻</span>
 						</button>
 					</div>
 
@@ -363,6 +477,12 @@ function onSave() {
 				</div>
 
 				<div :class="$style.footer">
+					<span
+						v-if="canSave"
+						:class="$style.derivedVerdict"
+						data-test-id="output-verdict-derived"
+						>{{ derivedVerdictText }}</span
+					>
 					<button :class="$style.cancelButton" @click="emit('cancel')">Cancel</button>
 					<button
 						:class="$style.saveButton"
@@ -483,6 +603,30 @@ function onSave() {
 	font-size: var(--font-size--3xs);
 	color: var(--color--text--tint-1);
 	text-wrap: pretty;
+}
+
+/* A chip that rewrites, rather than only labelling */
+.chipSteers {
+	margin-left: 4px;
+	font-size: 10px;
+	opacity: 0.55;
+}
+
+.suggestedHint {
+	padding: 0 var(--spacing--xs) var(--spacing--2xs);
+	font-size: var(--font-size--3xs);
+	color: var(--color--primary);
+	text-wrap: pretty;
+}
+
+.revertLink {
+	background: transparent;
+	border: none;
+	padding: 0;
+	font-size: var(--font-size--3xs);
+	color: var(--color--primary);
+	text-decoration: underline;
+	cursor: pointer;
 }
 
 /* The scope line: the only thing that says what a note is about */
@@ -619,31 +763,11 @@ function onSave() {
 	}
 }
 
-/* Verdict: rejecting the whole output vs flagging one issue in it */
-.verdictSwitch {
-	display: flex;
-	gap: var(--spacing--4xs);
-	padding: 3px;
-	border-radius: var(--radius--md);
-	background: var(--color--background);
-}
-
-.verdictOption {
-	flex: 1;
-	padding: var(--spacing--3xs) var(--spacing--2xs);
-	background: transparent;
-	border: none;
-	border-radius: var(--radius);
-	font-size: var(--font-size--2xs);
+/* What the notes add up to, stated rather than asked */
+.derivedVerdict {
+	margin-right: auto;
+	font-size: var(--font-size--3xs);
 	color: var(--color--text--tint-1);
-	cursor: pointer;
-}
-
-.verdictActive {
-	background: var(--color--background--light-3, #fff);
-	font-weight: var(--font-weight--bold);
-	color: var(--color--text);
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .chipRow {

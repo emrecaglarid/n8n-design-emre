@@ -125,11 +125,21 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 	function lastApprovedFor(nodeName: string, excludeId?: string): OutputRecord | null {
 		for (let index = records.value.length - 1; index >= 0; index--) {
 			const record = records.value[index];
-			if (record.nodeName === nodeName && record.verdict === 'up' && record.id !== excludeId) {
+			if (record.nodeName === nodeName && record.id !== excludeId && isBaselineWorthy(record)) {
 				return record;
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * An output flagged for one issue still describes the standard — excluding it
+	 * would leave the baseline stale exactly while someone is iterating. A
+	 * rejected output never becomes one.
+	 */
+	function isBaselineWorthy(record: OutputRecord): boolean {
+		if (record.verdict === 'up') return true;
+		return record.verdict === 'down' && record.outputVerdict === 'mostly-fine';
 	}
 
 	/** True when the preview's text differs from the last approved output */
