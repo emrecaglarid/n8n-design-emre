@@ -14,6 +14,9 @@ import EmailPreview from './EmailPreview.vue';
 import DestinationDropdown from '@/experiments/destinationPreviews/DestinationDropdown.vue';
 import AudienceDropdown from '@/experiments/destinationPreviews/AudienceDropdown.vue';
 import type { PreviewDestination } from '@/experiments/destinationPreviews/surfaceDial';
+import { useVariantsStore } from '@/experiments/variants/variants.store';
+
+const variants = useVariantsStore();
 
 const props = defineProps<{
 	preview: SimulatedPreview;
@@ -23,6 +26,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	verdict: [verdict: PreviewVerdict];
+	choose: [choice: 'baseline' | 'new'];
 	close: [];
 }>();
 
@@ -38,6 +42,14 @@ const title = computed(() => {
 // move where the output would land and who can see it.
 const destination = ref<PreviewDestination>({ kind: 'preview' });
 const audience = ref<'you' | 'team'>('you');
+
+/**
+ * Model C: ask which of two outputs is better instead of judging one. The two
+ * candidates are real — this run against what was last approved for the same
+ * node — so no second generation is paid for. A choice only exists when there
+ * is something to compare.
+ */
+const asChoice = computed(() => variants.secondCandidate === 'on' && Boolean(props.baseline));
 
 const baselineText = computed(() => {
 	if (!props.baseline) return '';
@@ -67,13 +79,31 @@ const newText = computed(
 			</button>
 		</div>
 		<div v-if="baseline" :class="$style.compareBody" data-test-id="simulated-output-compare">
-			<div :class="[$style.comparePane, $style.comparePaneOld]">
-				<span :class="$style.compareLabel">Last approved output</span>
+			<div :class="[$style.comparePane, !asChoice && $style.comparePaneOld]">
+				<span :class="$style.compareLabel">{{
+					asChoice ? 'A — what you approved before' : 'Last approved output'
+				}}</span>
 				<span :class="$style.compareText">{{ baselineText }}</span>
+				<button
+					v-if="asChoice"
+					:class="$style.chooseButton"
+					data-test-id="simulated-output-choose-baseline"
+					@click="emit('choose', 'baseline')"
+				>
+					This one's better
+				</button>
 			</div>
 			<div :class="$style.comparePane">
-				<span :class="$style.compareLabel">New output</span>
+				<span :class="$style.compareLabel">{{ asChoice ? 'B — this run' : 'New output' }}</span>
 				<span :class="$style.compareText">{{ newText }}</span>
+				<button
+					v-if="asChoice"
+					:class="$style.chooseButton"
+					data-test-id="simulated-output-choose-new"
+					@click="emit('choose', 'new')"
+				>
+					This one's better
+				</button>
 			</div>
 		</div>
 		<div v-else :class="$style.body">
@@ -91,7 +121,10 @@ const newText = computed(
 				:body="preview.body"
 			/>
 		</div>
-		<div :class="$style.footer">
+		<div v-if="asChoice" :class="$style.footer">
+			<span :class="$style.chooseHint">Which is better?</span>
+		</div>
+		<div v-else :class="$style.footer">
 			<button
 				:class="$style.thumbsDownButton"
 				title="Not right"
@@ -200,6 +233,35 @@ const newText = computed(
 
 .cardWide {
 	width: 720px;
+}
+
+/* Model C: choosing between two real outputs, instead of judging one */
+.chooseButton {
+	align-self: flex-start;
+	margin-top: var(--spacing--3xs);
+	padding: 5px 10px;
+	background: var(--color--background--light-3, #fff);
+	border: 1px solid var(--color--foreground);
+	border-radius: var(--radius);
+	font-size: var(--font-size--3xs);
+	font-weight: var(--font-weight--bold);
+	color: var(--color--text);
+	cursor: pointer;
+	transition-property: scale, border-color;
+	transition-duration: 100ms;
+
+	&:hover {
+		border-color: var(--color--primary);
+	}
+
+	&:active {
+		scale: 0.96;
+	}
+}
+
+.chooseHint {
+	font-size: var(--font-size--2xs);
+	color: var(--color--text--tint-1);
 }
 
 .compareBody {

@@ -11,7 +11,7 @@ import {
 import { useSimulatedOutputPreviews } from '../composables/useSimulatedOutputPreviews';
 import OutputPreviewCard from './OutputPreviewCard.vue';
 import OutputVerdictModal from './OutputVerdictModal.vue';
-import type { Finding } from '@/experiments/findings/findings';
+import { FINDING_SOURCES, createFinding, type Finding } from '@/experiments/findings/findings';
 
 const emit = defineEmits<{
 	stop: [];
@@ -78,6 +78,32 @@ async function onRejectSave(details: {
 		correction: details.correction,
 		outputVerdict: details.verdict,
 		findings: details.findings,
+	});
+}
+
+/**
+ * Model C: picking a side is a verdict on both outputs at once — the chosen one
+ * is approved, and the choice itself is the finding. No words are asked for.
+ */
+async function onChoose(preview: SimulatedPreview, choice: 'baseline' | 'new') {
+	const baseline = baselineFor(preview);
+	await flyToNode(preview);
+	const chosenNew = choice === 'new';
+	store.dismissPreview(preview.id, chosenNew ? 'up' : 'down', {
+		reason: chosenNew
+			? 'Chosen over the last approved output'
+			: 'The last approved output was better',
+		outputVerdict: chosenNew ? undefined : 'not-right',
+		findings: [
+			createFinding({
+				source: FINDING_SOURCES.human,
+				body: {
+					reason: chosenNew ? 'Preferred this run' : 'Preferred the previously approved output',
+					replacement: chosenNew ? undefined : (baseline?.correction ?? undefined),
+				},
+				status: 'accepted',
+			}),
+		],
 	});
 }
 
@@ -175,6 +201,7 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 						:preview="store.frontPreview"
 						:baseline="baselineFor(store.frontPreview)"
 						@verdict="onVerdict(store.frontPreview, $event)"
+						@choose="onChoose(store.frontPreview, $event)"
 						@close="onClose(store.frontPreview)"
 					/>
 				</template>
@@ -185,6 +212,7 @@ async function flyToNode(preview: SimulatedPreview): Promise<void> {
 						:preview="preview"
 						:baseline="baselineFor(preview)"
 						@verdict="onVerdict(preview, $event)"
+						@choose="onChoose(preview, $event)"
 						@close="onClose(preview)"
 					/>
 				</template>

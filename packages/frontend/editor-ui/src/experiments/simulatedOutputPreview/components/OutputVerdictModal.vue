@@ -126,6 +126,8 @@ const causeText = computed(() => {
 				: `Reworded somewhere. Most likely ${result.nodeNames.join(', then ')}.`;
 		case 'unknown':
 			return 'Nothing in this run to trace it against.';
+		default:
+			return '';
 	}
 });
 
