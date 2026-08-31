@@ -6,10 +6,12 @@ import {
 	useSimulatedOutputPreviewStore,
 	type SimulatedPreview,
 	type PreviewVerdict,
+	type OutputVerdict,
 } from '../simulatedOutputPreview.store';
 import { useSimulatedOutputPreviews } from '../composables/useSimulatedOutputPreviews';
 import OutputPreviewCard from './OutputPreviewCard.vue';
 import OutputVerdictModal from './OutputVerdictModal.vue';
+import type { Finding } from '@/experiments/findings/findings';
 
 const emit = defineEmits<{
 	stop: [];
@@ -59,12 +61,24 @@ async function onVerdict(preview: SimulatedPreview, verdict: PreviewVerdict) {
 	store.dismissPreview(preview.id, verdict);
 }
 
-async function onRejectSave(details: { reason: string; correction?: string }) {
+async function onRejectSave(details: {
+	verdict: OutputVerdict;
+	reason: string;
+	correction?: string;
+	findings: Finding[];
+}) {
 	const preview = rejecting.value;
 	rejecting.value = null;
 	if (!preview) return;
 	await flyToNode(preview);
-	store.dismissPreview(preview.id, 'down', details);
+	// "Mostly fine" is still a thumbs-down on the card, but the record keeps the
+	// distinction so one flagged field doesn't read as a rejected output.
+	store.dismissPreview(preview.id, 'down', {
+		reason: details.reason,
+		correction: details.correction,
+		outputVerdict: details.verdict,
+		findings: details.findings,
+	});
 }
 
 async function onClose(preview: SimulatedPreview) {

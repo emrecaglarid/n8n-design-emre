@@ -1,8 +1,15 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
+import type { Finding } from '@/experiments/findings/findings';
+
 export type SimulatedPreviewKind = 'slack' | 'email';
 export type PreviewVerdict = 'up' | 'down';
+/**
+ * How wrong the output was. Without this, a nitpick on one field marks the
+ * whole output rejected and the pass rate stops meaning anything.
+ */
+export type OutputVerdict = 'not-right' | 'mostly-fine';
 export type PillPhase = 'idle' | 'running' | 'generating' | 'success';
 
 export interface SimulatedPreview {
@@ -45,6 +52,18 @@ export interface OutputRecord extends SimulatedPreview {
 	workflowId: string;
 	reason?: string;
 	correction?: string;
+	/** How wrong it was: a flagged issue is not a rejected output */
+	outputVerdict?: OutputVerdict;
+	/** Every note attached to this verdict, each with its own scope */
+	findings?: Finding[];
+}
+
+/** What a thumbs-down carries back from the dialog */
+export interface VerdictDetails {
+	reason?: string;
+	correction?: string;
+	outputVerdict?: OutputVerdict;
+	findings?: Finding[];
 }
 
 const RECORDS_STORAGE_PREFIX = 'N8N_EXPERIMENT_SIM_OUTPUTS';
@@ -140,10 +159,7 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		}
 	}
 
-	function recordOutput(
-		preview: SimulatedPreview,
-		details?: { reason?: string; correction?: string },
-	) {
+	function recordOutput(preview: SimulatedPreview, details?: VerdictDetails) {
 		const workflowId = currentWorkflowId.value;
 		if (!workflowId) return;
 		const existing = records.value.findIndex((record) => record.id === preview.id);
@@ -153,10 +169,7 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 		persistRecords();
 	}
 
-	function pushToStack(
-		preview: SimulatedPreview,
-		details?: { reason?: string; correction?: string },
-	) {
+	function pushToStack(preview: SimulatedPreview, details?: VerdictDetails) {
 		stacks.value = {
 			...stacks.value,
 			[preview.nodeName]: [...(stacks.value[preview.nodeName] ?? []), preview],
@@ -194,11 +207,7 @@ export const useSimulatedOutputPreviewStore = defineStore('simulatedOutputPrevie
 	}
 
 	/** Judge or close one preview: it leaves the deck and lands in the node's stack */
-	function dismissPreview(
-		id: string,
-		verdict?: PreviewVerdict,
-		details?: { reason?: string; correction?: string },
-	) {
+	function dismissPreview(id: string, verdict?: PreviewVerdict, details?: VerdictDetails) {
 		const preview = previews.value.find((p) => p.id === id);
 		if (!preview) return;
 		pushToStack({ ...preview, verdict }, details);
