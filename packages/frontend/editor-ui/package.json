@@ -83,6 +83,7 @@
     "cron": "catalog:",
     "curlconverter": "^4.12.0",
     "dateformat": "^3.0.3",
+    "dialkit": "catalog:",
     "element-plus": "catalog:frontend",
     "email-providers": "^2.0.1",
     "esprima-next": "5.8.4",
@@ -97,6 +98,7 @@
     "luxon": "catalog:",
     "markdown-it": "catalog:",
     "markdown-it-footnote": "^4.0.0",
+    "motion-v": "catalog:",
     "n8n-workflow": "workspace:*",
     "nanoid": "catalog:",
     "pinia": "catalog:frontend",
@@ -128,8 +130,8 @@
     "web-tree-sitter": "0.24.3",
     "xss": "catalog:",
     "yaml": "catalog:",
-    "zod": "catalog:",
-    "z-vue-scan": "^0.0.35"
+    "z-vue-scan": "^0.0.35",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@codecov/vite-plugin": "^1.9.1",
@@ -173,8 +175,8 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "sass-embedded": "catalog:",
-    "stylelint": "catalog:",
     "storybook": "catalog:storybook",
+    "stylelint": "catalog:",
     "unplugin-icons": "catalog:frontend",
     "vite": "catalog:",
     "vite-plugin-node-polyfills": "^0.25.0",
