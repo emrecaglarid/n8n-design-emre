@@ -9,9 +9,12 @@ import {
 	createFinding,
 	scopeLabel,
 	type Finding,
+	type FindingCause,
 	type FindingScope,
 } from '@/experiments/findings/findings';
 import { useVariantsStore } from '@/experiments/variants/variants.store';
+import { useOutputProvenance } from '@/experiments/outputProvenance/useOutputProvenance';
+import type { ProvenanceResult } from '@/experiments/outputProvenance/outputProvenance';
 import type { OutputVerdict, SimulatedPreview } from '../simulatedOutputPreview.store';
 
 /**
@@ -46,6 +49,7 @@ const emit = defineEmits<{
 
 const nodeTypesStore = useNodeTypesStore();
 const variants = useVariantsStore();
+const provenance = useOutputProvenance();
 const nodeType = computed(() => nodeTypesStore.getNodeType(props.preview.nodeType));
 
 const title = computed(() => {
@@ -81,13 +85,76 @@ function onOutputSelect() {
 	// A caret, or a stray drag, is not a scope.
 	if (selected.length < 2) return;
 	scope.value = { kind: 'span', text: selected };
+	traceScope();
 }
 
 function clearScope() {
 	scope.value = { kind: 'whole' };
+	cause.value = null;
 	// The selection *is* the scope, so a live range would immediately re-arm it.
 	const el = outputEl.value;
 	if (el) el.setSelectionRange(el.selectionEnd, el.selectionEnd);
+}
+
+// ── Where the value came from ────────────────────────────────────────────────
+// Traced as soon as something is selected, so it informs the note the user is
+// about to write instead of arriving after they have already decided.
+const cause = ref<ProvenanceResult | null>(null);
+
+function traceScope() {
+	if (variants.localization === 'off' || scope.value.kind !== 'span') {
+		cause.value = null;
+		return;
+	}
+	cause.value = provenance.trace(scope.value.text, props.preview.nodeName);
+}
+
+const causeText = computed(() => {
+	const result = cause.value;
+	if (!result) return '';
+	switch (result.kind) {
+		case 'passed-through':
+			return `${result.nodeName} produced this value — it was passed through, not written.`;
+		case 'generated':
+			return provenance.hasModelUpstream(props.preview.nodeName)
+				? 'No step in this run carries this text — a model wrote it, so instructions are the lever.'
+				: `No step in this run carries this text — it comes from ${props.preview.nodeName}'s own message, so edit it there.`;
+		case 'candidates':
+			// In ranked mode nothing was ruled out, so don't imply a rewording was found.
+			return variants.localization === 'ranked'
+				? `These steps were involved — start with ${result.nodeNames.join(', then ')}.`
+				: `Reworded somewhere. Most likely ${result.nodeNames.join(', then ')}.`;
+		case 'unknown':
+			return 'Nothing in this run to trace it against.';
+	}
+});
+
+/**
+ * Traced answers are facts: the value is either carried by an upstream step or
+ * it is not. Only a ranked list is a guess, and it should read like one.
+ */
+const causeIsCertain = computed(
+	() => cause.value?.kind === 'passed-through' || cause.value?.kind === 'generated',
+);
+
+/** Prompt changes cannot fix a value a node handed over unchanged. */
+const suppressInstructionFix = computed(() => cause.value?.kind === 'passed-through');
+
+function findingCause(): FindingCause | undefined {
+	const result = cause.value;
+	if (!result) return undefined;
+	switch (result.kind) {
+		case 'passed-through':
+			return { kind: 'node', nodeName: result.nodeName, certain: true };
+		case 'generated':
+			return provenance.hasModelUpstream(props.preview.nodeName)
+				? { kind: 'model', certain: true }
+				: { kind: 'node', nodeName: props.preview.nodeName, certain: true };
+		case 'candidates':
+			return { kind: 'node', nodeName: result.nodeNames[0], certain: false };
+		case 'unknown':
+			return { kind: 'unclear', certain: false };
+	}
 }
 
 // ── The composer: one box, scoped by the line above it ───────────────────────
@@ -107,6 +174,7 @@ function buildFinding(): Finding | null {
 		scope: scope.value,
 		body: { reason },
 		output: originalText.value,
+		cause: findingCause(),
 	});
 }
 
@@ -249,6 +317,18 @@ function onSave() {
 						>
 							<N8nIcon icon="x" size="small" />
 						</button>
+					</div>
+
+					<div
+						v-if="causeText"
+						:class="[$style.causeStrip, causeIsCertain && $style.causeCertain]"
+						data-test-id="output-verdict-cause"
+					>
+						<span :class="$style.causeLabel">{{ causeIsCertain ? 'TRACED' : 'BEST GUESS' }}</span>
+						<span :class="$style.causeText">{{ causeText }}</span>
+						<span v-if="suppressInstructionFix" :class="$style.causeNote">
+							No instruction change is offered for this — fix it in the node.
+						</span>
 					</div>
 
 					<div :class="$style.chipRow">
@@ -438,6 +518,42 @@ function onSave() {
 		background: var(--color--background);
 		color: var(--color--text);
 	}
+}
+
+/* What the run data says about the selected value */
+.causeStrip {
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing--4xs);
+	padding: var(--spacing--2xs);
+	border: 1px dashed var(--color--foreground);
+	border-radius: var(--radius);
+	background: var(--color--background);
+}
+
+.causeCertain {
+	border-style: solid;
+	border-color: var(--color--primary);
+	background: var(--color--background--light-3, #fff);
+}
+
+.causeLabel {
+	font-size: 9px;
+	font-weight: var(--font-weight--bold);
+	letter-spacing: 0.06em;
+	color: var(--color--text--tint-1);
+}
+
+.causeText {
+	font-size: var(--font-size--2xs);
+	color: var(--color--text);
+	text-wrap: pretty;
+}
+
+.causeNote {
+	font-size: var(--font-size--3xs);
+	color: var(--color--text--tint-1);
+	text-wrap: pretty;
 }
 
 /* Notes already committed on this output */

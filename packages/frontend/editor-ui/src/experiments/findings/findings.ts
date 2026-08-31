@@ -38,6 +38,17 @@ export type FindingScope =
 
 export type FindingStatus = 'open' | 'accepted' | 'dismissed';
 
+/**
+ * Which of the two failure classes this was. `certain` separates a value
+ * traced through the run data from a ranked guess — they should never read the
+ * same to whoever sees the finding later.
+ */
+export interface FindingCause {
+	kind: 'node' | 'model' | 'unclear';
+	nodeName?: string;
+	certain: boolean;
+}
+
 export interface FindingBody {
 	/** Why it is wrong, from a chip or typed. May be empty when the correction says it. */
 	reason: string;
@@ -55,6 +66,8 @@ export interface Finding {
 	request?: string;
 	/** The output being judged */
 	output?: string;
+	/** Where the problem came from, when the run data could say */
+	cause?: FindingCause;
 	createdAt: number;
 }
 
@@ -73,6 +86,7 @@ export function createFinding(input: {
 	status?: FindingStatus;
 	request?: string;
 	output?: string;
+	cause?: FindingCause;
 }): Finding {
 	return {
 		id: crypto.randomUUID(),
@@ -82,6 +96,7 @@ export function createFinding(input: {
 		body: input.body,
 		request: input.request,
 		output: input.output,
+		cause: input.cause,
 		createdAt: Date.now(),
 	};
 }
