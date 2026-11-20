@@ -2,7 +2,7 @@ import { AGENT_CHAT_ERROR_CODES, type AgentSseEvent } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
 import { UserRepository, type User } from '@n8n/db';
 import { OnShutdown } from '@n8n/decorators';
-import { Service } from '@n8n/di';
+import { Container, Service } from '@n8n/di';
 import { OperationalError, UnexpectedError, UserError } from '@n8n/errors';
 
 import { CredentialsService } from '@/credentials/credentials.service';
@@ -21,6 +21,7 @@ import type { AgentChatBridge } from './integrations/agent-chat-bridge';
 import { ChatIntegrationService } from './integrations/chat-integration.service';
 import { AgentMessageQueueRepository } from './repositories/agent-message-queue.repository';
 import { canUseSystemAgent } from './system-agents/system-agent-access';
+import { TestCopyService } from './test-copies/test-copy.service';
 import { SystemAgentExecutionService } from './system-agents/system-agent-execution.service';
 import { SystemAgentRegistry } from './system-agents/system-agent-registry';
 import { chatSurfaceForKind, type AgentChatSurface } from './utils/agent-thread-access';
@@ -299,11 +300,28 @@ export class AgentMessageQueueConsumer {
 			return;
 		}
 
+		// Prototype: a test chat runs against its own test copy of the apps.
+		const testCopies = Container.get(TestCopyService);
+		let message = payload.message;
+		if (testCopies.enabled) {
+			try {
+				await testCopies.startTurn(thread.id);
+				message = await testCopies.deliverChannelMessage(thread.id, message);
+			} catch (error) {
+				this.logger.warn('[test-copy] could not make the test copy', { error });
+				const failure =
+					"The test copy of your apps isn't available, so this test can't run. Nothing was sent.";
+				await this.queue.recordFailure(claim, new UserError(failure), signal);
+				send({ type: 'error', message: failure });
+				return;
+			}
+		}
+
 		const result = await this.testRunService.executePreparedDraftRun({
 			agentId: thread.agentId,
 			projectId: thread.projectId,
 			user,
-			message: payload.message,
+			message,
 			pauseReport: Boolean(payload.stopReportId),
 			hideUserMessageFromTranscript: payload.hidden,
 			attachments: payload.attachments,
@@ -317,6 +335,10 @@ export class AgentMessageQueueConsumer {
 			onChunk: (chunk) => emitChunkEvents(chunk, send),
 			onBudgetNotice: (notice) => send({ type: 'budget-notice', ...notice }),
 		});
+
+		if (testCopies.enabled && result.status === 'completed') {
+			await testCopies.deliverChannelReply(thread.id, result.response);
+		}
 
 		if (result.status === 'completed')
 			send({ type: 'done', sessionId: thread.id, executionId: admission.executionId });

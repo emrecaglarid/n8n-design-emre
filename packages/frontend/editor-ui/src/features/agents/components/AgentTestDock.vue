@@ -444,6 +444,9 @@ defineExpose({ clearBudgetStops });
 }
 
 .sessionHistory {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--4xs);
 	min-width: 0;
 }
 

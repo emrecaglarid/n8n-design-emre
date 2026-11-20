@@ -15,7 +15,7 @@ import {
 	N8N_CHAT_INTEGRATION_TYPE,
 } from '@n8n/api-types';
 import { AgentsConfig } from '@n8n/config';
-import type { AuthenticatedRequest } from '@n8n/db';
+import type { AuthenticatedRequest, User } from '@n8n/db';
 import {
 	Body,
 	Delete,
@@ -57,6 +57,9 @@ import type { FlushableResponse } from './agent-sse-stream';
 import { AgentTestChatService, chatThreadId } from './agent-test-chat.service';
 import { AgentTestRunService } from './agent-test-run.service';
 import { AgentsService } from './agents.service';
+import { canBuilderUseDraftInChat } from './test-copies/test-copy-chat-access';
+import { readTestChannel } from './test-copies/test-copy-channel';
+import { TestCopyService } from './test-copies/test-copy.service';
 import { AgentBackgroundJobService } from './background/agent-background-job.service';
 import { N8NCheckpointStorage } from './integrations/n8n-checkpoint-storage';
 import {
@@ -88,12 +91,18 @@ export class AgentChatController {
 		private readonly agentsConfig: AgentsConfig,
 		private readonly chatRelay: AgentChatRelayService,
 		private readonly plans: AgentPlanService,
+		private readonly testCopies: TestCopyService,
 	) {}
 
-	private async requireProductionChat(agentId: string, projectId: string): Promise<void> {
-		if (!(await this.agentsService.isN8nChatPublished(agentId, projectId))) {
-			throw new NotFoundError('Agent is not available in n8n Chat');
-		}
+	private async requireProductionChat(
+		agentId: string,
+		projectId: string,
+		user?: User,
+	): Promise<void> {
+		if (await this.agentsService.isN8nChatPublished(agentId, projectId)) return;
+		// Prototype (test copies): the builder may use an unpublished agent in n8n Chat, for real.
+		if (await canBuilderUseDraftInChat(user, projectId)) return;
+		throw new NotFoundError('Agent is not available in n8n Chat');
 	}
 
 	private async requireProductionThread(
@@ -177,7 +186,10 @@ export class AgentChatController {
 		const { projectId } = req.params;
 		const resourceId = productionChatMemoryResourceId(req.user.id);
 		await this.chatRelay.relayQueuedMessage(res, async () => {
-			if (!(await this.agentsService.isN8nChatPublished(agentId, projectId))) {
+			if (
+				!(await this.agentsService.isN8nChatPublished(agentId, projectId)) &&
+				!(await canBuilderUseDraftInChat(req.user, projectId))
+			) {
 				throw new AgentN8nChatUnavailableError();
 			}
 			const sessionMode = payload.sessionId && !payload.newSession ? 'existing' : 'new';
@@ -294,6 +306,9 @@ export class AgentChatController {
 			}
 			const threadId = prepared.sessionId;
 			const resourceId = draftChatMemoryResourceId(req.user.id);
+			// Prototype: a test message can come from a channel (Slack) instead of the chat.
+			const testChannel = readTestChannel(payload.clientContext);
+			this.testCopies.setPendingChannel(threadId, testChannel);
 			return {
 				agentId,
 				projectId,
@@ -302,7 +317,9 @@ export class AgentChatController {
 				source: 'chat',
 				payload: {
 					kind: 'preview',
-					message,
+					message: testChannel
+						? this.testCopies.formatChannelMessage(testChannel, message)
+						: message,
 					messageId,
 					attachments: await this.chatRelay.storeChatAttachments({
 						attachments,
@@ -405,7 +422,7 @@ export class AgentChatController {
 		@Param('executionId') executionId: string,
 		@Query payload: AgentChatCancelDto = {},
 	) {
-		await this.requireProductionChat(agentId, req.params.projectId);
+		await this.requireProductionChat(agentId, req.params.projectId, req.user);
 		await this.requireProductionThread(threadId, req.params.projectId, agentId, req.user.id);
 		return {
 			cancelRequested: await this.chatExecutionService.requestCancel({
@@ -429,7 +446,7 @@ export class AgentChatController {
 		@Param('runId') runId: string,
 		@Query payload: AgentChatCancelDto = {},
 	) {
-		await this.requireProductionChat(agentId, req.params.projectId);
+		await this.requireProductionChat(agentId, req.params.projectId, req.user);
 		return {
 			cancelled: await this.agentExecutionOrchestratorService.cancelChatRun({
 				agentId,
@@ -452,7 +469,7 @@ export class AgentChatController {
 		req: AuthenticatedRequest<{ projectId: string; agentId: string; threadId: string }>,
 	): Promise<AgentChatMessagesResponse> {
 		const { projectId, agentId, threadId } = req.params;
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		await this.requireProductionThread(threadId, projectId, agentId, req.user.id);
 		const history = await this.agentExecutionOrchestratorService.getConversationHistory({
 			threadId,
@@ -478,7 +495,7 @@ export class AgentChatController {
 		res: Response,
 	) {
 		const { projectId, agentId, attachmentId } = req.params;
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		const attachment = await this.agentChatAttachmentService.getForAgent(attachmentId, {
 			agentId,
 			projectId,
@@ -504,7 +521,7 @@ export class AgentChatController {
 		req: AuthenticatedRequest<{ projectId: string; agentId: string; threadId: string }>,
 	): Promise<AgentSessionFilesResponse> {
 		const { projectId, agentId, threadId } = req.params;
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		// A new session has no thread until its first execution starts.
 		if (!(await this.agentExecutionService.findThreadById(threadId))) return { files: [] };
 		await this.requireProductionThread(threadId, projectId, agentId, req.user.id);
@@ -520,7 +537,7 @@ export class AgentChatController {
 	async getProductionQueuedMessages(
 		req: AuthenticatedRequest<{ projectId: string; agentId: string; threadId: string }>,
 	): Promise<AgentChatQueueResponse> {
-		await this.requireProductionChat(req.params.agentId, req.params.projectId);
+		await this.requireProductionChat(req.params.agentId, req.params.projectId, req.user);
 		return await this.messageQueue.listPending({
 			...req.params,
 			userId: req.user.id,
@@ -541,7 +558,7 @@ export class AgentChatController {
 		@Body payload: AgentChatQueueUpdateDto,
 	): Promise<void> {
 		this.assertQueueId(req.params.queueId);
-		await this.requireProductionChat(req.params.agentId, req.params.projectId);
+		await this.requireProductionChat(req.params.agentId, req.params.projectId, req.user);
 		await this.messageQueue.updatePending({
 			...req.params,
 			userId: req.user.id,
@@ -563,7 +580,7 @@ export class AgentChatController {
 		@Body payload: AgentChatQueueReorderDto,
 	): Promise<void> {
 		this.assertQueueId(req.params.queueId);
-		await this.requireProductionChat(req.params.agentId, req.params.projectId);
+		await this.requireProductionChat(req.params.agentId, req.params.projectId, req.user);
 		await this.messageQueue.reorderPending({
 			...req.params,
 			userId: req.user.id,
@@ -586,7 +603,7 @@ export class AgentChatController {
 		@Body payload: AgentChatQueueSteerDto,
 	): Promise<void> {
 		this.assertQueueId(req.params.queueId);
-		await this.requireProductionChat(req.params.agentId, req.params.projectId);
+		await this.requireProductionChat(req.params.agentId, req.params.projectId, req.user);
 		await this.messageQueue.steer({
 			...req.params,
 			userId: req.user.id,
@@ -606,7 +623,7 @@ export class AgentChatController {
 		}>,
 	) {
 		this.assertQueueId(req.params.queueId);
-		await this.requireProductionChat(req.params.agentId, req.params.projectId);
+		await this.requireProductionChat(req.params.agentId, req.params.projectId, req.user);
 		await this.messageQueue.removePending({ ...req.params, userId: req.user.id, kind: 'n8n_chat' });
 		return { removed: true };
 	}
@@ -617,7 +634,7 @@ export class AgentChatController {
 		req: AuthenticatedRequest<{ projectId: string; agentId: string; threadId: string }>,
 	): Promise<AgentBackgroundJobsResponse> {
 		const { projectId, agentId, threadId } = req.params;
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		const thread = await this.agentExecutionService.findThreadById(threadId);
 
 		// A new n8n Chat session has no thread until its first execution starts.
@@ -637,7 +654,7 @@ export class AgentChatController {
 		const { projectId, agentId, threadId } = req.params;
 		if (!this.agentsConfig.backgroundTasksEnabled)
 			throw new BadRequestError('Background tasks are not enabled');
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		await this.requireProductionThread(threadId, projectId, agentId, req.user.id);
 		await this.backgroundJobService.requestPause(
 			agentId,
@@ -656,7 +673,7 @@ export class AgentChatController {
 		@Body payload: AgentChatResumeDto,
 	) {
 		const { projectId, agentId, threadId } = req.params;
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		const resumed = await this.agentExecutionOrchestratorService.resumeBackgroundForChat({
 			...payload,
 			resumeData: payload.resumeData,
@@ -681,7 +698,7 @@ export class AgentChatController {
 		@Param('threadId') threadId: string,
 	) {
 		const { projectId } = req.params;
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		await this.requireProductionThread(threadId, projectId, agentId, req.user.id);
 		const deleted = await this.agentExecutionService.deleteThread(
 			projectId,
@@ -928,7 +945,7 @@ export class AgentChatController {
 	) {
 		const { projectId, agentId, threadId } = req.params;
 
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		await this.requireProductionThread(threadId, projectId, agentId, req.user.id);
 
 		if (!this.agentsConfig.backgroundTasksEnabled && !this.agentsConfig.planToolsEnabled)
@@ -991,7 +1008,7 @@ export class AgentChatController {
 	) {
 		const { projectId, agentId, threadId } = req.params;
 
-		await this.requireProductionChat(agentId, projectId);
+		await this.requireProductionChat(agentId, projectId, req.user);
 		await this.requireProductionThread(threadId, projectId, agentId, req.user.id);
 
 		return presentPlan(await this.plans.findLatestPlan(threadId, {}));

@@ -46,6 +46,7 @@ export class AgentsModule implements ModuleInterface {
 		await import('./agent-sandbox.controller.js');
 		await import('./agents-list.controller.js');
 		await import('./agent-mcp-access.controller.js');
+		await import('./test-copies/test-copy.controller.js');
 		const { AgentsService } = await import('./agents.service.js');
 		Container.get(AgentsService);
 

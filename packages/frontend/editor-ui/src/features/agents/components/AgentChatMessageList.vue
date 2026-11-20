@@ -66,6 +66,12 @@ import {
 } from '../constants';
 
 import { AGENT_BUILDER_STANDALONE_KEY } from './agentBuilderInjectionKeys';
+import AgentTestCopyChannelMessage from '../testCopy/components/AgentTestCopyChannelMessage.vue';
+import AgentTestCopyNextStep from '../testCopy/components/AgentTestCopyNextStep.vue';
+import AgentTestCopyThreadNote from '../testCopy/components/AgentTestCopyThreadNote.vue';
+import AgentTestCopyThreadReply from '../testCopy/components/AgentTestCopyThreadReply.vue';
+import AgentTestCopyTurnChanges from '../testCopy/components/AgentTestCopyTurnChanges.vue';
+import { useTestCopyMessageList } from '../testCopy/useTestCopyMessageList';
 
 const standaloneBuilder = inject(AGENT_BUILDER_STANDALONE_KEY, false);
 
@@ -268,6 +274,15 @@ const visibleMessages = computed(() => {
 });
 
 const displayGroups = computed(() => buildAgentPlanDisplayGroups(visibleMessages.value));
+const {
+	channelSendByGroupId: testChannelSends,
+	turnChangesByGroupId: testTurnChanges,
+	thread: testThread,
+	nextStepGroupId: testNextStepGroupId,
+} = useTestCopyMessageList(
+	displayGroups,
+	() => props.messagingState === 'idle' && !streamingGroupId.value,
+);
 const taskSummaryGroupIds = computed(() =>
 	getTaskSummaryGroupIds(visibleMessages.value, displayGroups.value),
 );
@@ -708,7 +723,13 @@ watch(
 </script>
 
 <template>
-	<div ref="scrollRef" :class="$style.messages" @scroll.passive="onScroll">
+	<div
+		ref="scrollRef"
+		:class="[$style.messages, { [$style.slackThread]: testThread }]"
+		:data-test-copy-slack-thread="testThread ? '' : undefined"
+		@scroll.passive="onScroll"
+	>
+		<AgentTestCopyThreadNote v-if="testThread" :label="testThread.label" :session-id="sessionId" />
 		<template v-for="group in displayGroups" :key="group.id">
 			<div
 				v-if="dividerLabels.has(group.id)"
@@ -745,6 +766,11 @@ watch(
 						:dismissed-tool-call-ids="dismissedFixToolCallIds"
 						:execution-id="group.executionId"
 						@fix-with-assistant="onFixWithAssistant(group, $event)"
+					/>
+					<AgentTestCopyTurnChanges
+						v-if="testTurnChanges.has(group.id)"
+						:changes="testTurnChanges.get(group.id)!"
+						:after-steps="getGroupToolCalls(group.id).steps.length > 0"
 					/>
 					<div
 						v-for="result in getGroupToolCalls(group.id).hostResults"
@@ -798,6 +824,11 @@ watch(
 						"
 						:retry-disabled="retryDisabled"
 						@retry="emit('retry', $event)"
+					/>
+					<AgentTestCopyThreadReply
+						v-else-if="testThread && group.finalMessage?.content"
+						:text="group.finalMessage.content"
+						:time="group.finalMessage.createdAt"
 					/>
 					<div
 						v-else-if="group.finalMessage?.content"
@@ -871,6 +902,7 @@ watch(
 						:class="$style.typingIndicator"
 					/>
 				</N8nChatMessage>
+				<AgentTestCopyNextStep v-if="testNextStepGroupId === group.id" />
 			</div>
 			<div
 				v-else
@@ -894,7 +926,14 @@ watch(
 				>
 					{{ group.message.author.name }}
 				</N8nText>
-				<N8nChatMessage :role="group.message.role">
+				<AgentTestCopyChannelMessage
+					v-if="testChannelSends.has(group.id)"
+					:label="testChannelSends.get(group.id)!.label"
+					:text="testChannelSends.get(group.id)!.text"
+					:time="group.message.createdAt"
+					:in-thread="Boolean(testThread)"
+				/>
+				<N8nChatMessage v-else :role="group.message.role">
 					<AgentChatHostEvents :items="getGroupHostEventItems(group.id).start" />
 					<AgentChatToolSteps
 						v-if="getGroupToolCalls(group.id).steps.length"
@@ -905,6 +944,11 @@ watch(
 						:dismissed-tool-call-ids="dismissedFixToolCallIds"
 						:execution-id="group.message.executionId"
 						@fix-with-assistant="onFixWithAssistant(group, $event)"
+					/>
+					<AgentTestCopyTurnChanges
+						v-if="testTurnChanges.has(group.id)"
+						:changes="testTurnChanges.get(group.id)!"
+						:after-steps="getGroupToolCalls(group.id).steps.length > 0"
 					/>
 					<div
 						v-for="result in getGroupToolCalls(group.id).hostResults"
@@ -979,6 +1023,16 @@ watch(
 							</N8nLink>
 						</template>
 					</div>
+					<AgentTestCopyThreadReply
+						v-else-if="
+							testThread &&
+							group.message.role === CHAT_MESSAGE_ROLE.ASSISTANT &&
+							group.message.content &&
+							!isRetryableChatError(group.message)
+						"
+						:text="group.message.content"
+						:time="group.message.createdAt"
+					/>
 					<template v-else>
 						<AgentChatRetryError
 							v-if="isRetryableChatError(group.message)"
@@ -1112,6 +1166,7 @@ watch(
 						:class="$style.typingIndicator"
 					/>
 				</N8nChatMessage>
+				<AgentTestCopyNextStep v-if="testNextStepGroupId === group.id" />
 			</div>
 		</template>
 
@@ -1164,6 +1219,63 @@ watch(
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
+}
+
+/*
+ * Slack sessions: every row starts at the same left edge, so the chat's indent
+ * of assistant content goes away. N8nChatMessage has no prop for it.
+ */
+/*
+ * Prototype (test copies): in a Slack session the thread is tinted below the
+ * intro line, which draws a white band above it to the pane edges. So the scroll
+ * area spans the whole pane while its content keeps the chat column width, and
+ * full-width pieces bleed out with negative margins (clipped by the scroll area).
+ */
+.slackThread {
+	--test-copy--next-step-inset: 0;
+	--test-copy--surface-top: light-dark(
+		color-mix(in srgb, var(--color--purple-500) 4%, var(--background--surface)),
+		color-mix(in srgb, var(--color--purple-300) 2%, var(--background--surface))
+	);
+	--test-copy--surface-middle: light-dark(
+		color-mix(in srgb, var(--color--orange-100) 45%, var(--background--surface)),
+		color-mix(in srgb, var(--color--orange-300) 1.5%, var(--background--surface))
+	);
+
+	max-width: none;
+	padding-inline: max(
+		var(--spacing--md),
+		calc((100% - var(--agent-chat-max-width, 800px)) / 2 + var(--spacing--md))
+	);
+	overflow-x: clip;
+	/* The intro sits flush under the toolbar, at the top and when stuck. */
+	padding-top: 0;
+	background-color: var(--background--surface);
+	background-image: linear-gradient(
+		to bottom,
+		var(--test-copy--surface-top) 0%,
+		var(--test-copy--surface-middle) 55%,
+		var(--background--surface) 100%
+	);
+}
+
+/* The intro paints white above its line, to the pane edges. */
+.slackThread :global([data-testid='agent-test-copy-thread-note']) {
+	margin-inline: -100vw;
+	padding-inline: 100vw;
+	background-color: var(--background--surface);
+	box-shadow: 0 0 0 100vh var(--background--surface);
+	clip-path: inset(-100vh 0 0 0);
+}
+
+/* The next step stays under the first reply, inside the thread: its line runs to the pane edges. */
+.slackThread :global([data-testid='agent-test-copy-next-step']) {
+	margin-inline: -100vw;
+	padding-inline: 100vw;
+}
+
+.slackThread :global([class*='assistantContent']) {
+	padding-inline: 0;
 }
 
 .timestampDivider {

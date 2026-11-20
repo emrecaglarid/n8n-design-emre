@@ -19,6 +19,7 @@ import { NodeTypesProviderMissingError, NodeTypesProxy } from '@n8n/backend-serv
 import { AgentFileBridge, FILES_INPUT_SCHEMA } from '../agent-file-bridge.service';
 import type { InstrumentToolAdditionalData } from '../evaluation/agent-evaluation.contracts';
 import { toPolicyRefusalResult } from './policy-refusal';
+import { TestCopyService } from '../test-copies/test-copy.service';
 
 type NodeToolInputSchema = JSONSchema7 | z.ZodType;
 
@@ -183,6 +184,22 @@ export async function resolveNodeTool(
 							threadId: toolCtx.persistence?.threadId,
 						})
 					: undefined;
+			// Prototype: a test chat runs this call against its test copy of the apps.
+			const testCopies = Container.get(TestCopyService);
+			const threadId = toolCtx.persistence?.threadId;
+			const testCopy = await testCopies.toolConfigurator(
+				threadId,
+				toolCtx.toolCallId,
+				sanitizedName,
+			);
+			const execution = testCopy
+				? {
+						configureAdditionalData: (additionalData: IWorkflowExecuteAdditionalData) => {
+							instrumentedExecution.configureAdditionalData?.(additionalData);
+							testCopy(additionalData);
+						},
+					}
+				: instrumentedExecution;
 			const result = await ctx.executor.executeInline({
 				nodeType,
 				nodeTypeVersion: toolSchema.node.nodeTypeVersion,
@@ -193,7 +210,11 @@ export async function resolveNodeTool(
 				],
 				projectId: ctx.projectId,
 				...instrumentedExecution,
+				...execution,
 			});
+			if (testCopy && result.status === 'error' && threadId) {
+				testCopies.dropChangesOf(threadId, toolCtx.toolCallId);
+			}
 			// A refusal is returned, not thrown: thrown errors reach the chat as plain text.
 			if (result.status === 'error' && result.violations) {
 				return toPolicyRefusalResult(

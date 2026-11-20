@@ -1,3 +1,4 @@
+import { formatTestChannelMessage } from '@n8n/api-types';
 import { describe, expect, it } from 'vitest';
 import { formatThreadTitle } from '../utils/thread-title';
 
@@ -39,5 +40,16 @@ describe('formatThreadTitle', () => {
 
 	it('uses the fallback when firstMessage is whitespace-only', () => {
 		expect(formatThreadTitle({ title: null, firstMessage: '   \n\t' }, FALLBACK)).toBe(FALLBACK);
+	});
+
+	it('leaves out the context line of a test message sent from a channel', () => {
+		const firstMessage = formatTestChannelMessage(
+			'#support',
+			'Riley Chen',
+			'Where is order #1006?',
+		);
+		expect(formatThreadTitle({ title: null, firstMessage }, FALLBACK)).toBe(
+			'Where is order #1006?',
+		);
 	});
 });

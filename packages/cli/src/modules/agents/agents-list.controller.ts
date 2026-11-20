@@ -53,7 +53,9 @@ export class AgentsListController {
 	 */
 	@Get('/n8n-chat/agents/:agentId')
 	async getChatAgent(req: AuthenticatedRequest, _res: Response, @Param('agentId') agentId: string) {
-		const agent = await this.agentsService.findChatReachableAgentForUser(agentId, req.user);
+		const agent =
+			(await this.agentsService.findChatReachableAgentForUser(agentId, req.user)) ??
+			(await this.agentsService.findDraftChatAgentForBuilder(agentId, req.user));
 		if (!agent) throw new NotFoundError(`Agent "${agentId}" not found`);
 		return agent;
 	}

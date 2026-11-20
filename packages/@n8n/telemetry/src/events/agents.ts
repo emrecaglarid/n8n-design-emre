@@ -1058,6 +1058,7 @@ export const AGENTS_TELEMETRY = defineTelemetryEvents({
 					'copy-link',
 					'copy-conversation',
 					'open-in-new-tab',
+					'open-in-n8n-chat',
 					'toggle-full-width',
 					'export-session',
 					'delete-session',

@@ -29,10 +29,12 @@ import {
 	CONTINUE_SESSION_ID_PARAM,
 	OPEN_PREVIEW_PARAM,
 } from '../constants';
+import { useOpenInN8nChat } from '../testCopy/useOpenInN8nChat';
 
 const COPY_LINK = 'copy-link';
 const COPY_CONVERSATION = 'copy-conversation';
 const OPEN_IN_NEW_TAB = 'open-in-new-tab';
+const OPEN_IN_N8N_CHAT = 'open-in-n8n-chat';
 const TOGGLE_FULL_WIDTH = 'toggle-full-width';
 const EXPORT_SESSION = 'export-session';
 const DELETE_SESSION = 'delete-session';
@@ -73,7 +75,19 @@ const canLinkSession = computed(function canLinkSession() {
 	return props.hasSession && Boolean(props.effectiveSessionId);
 });
 
+// Test chats: the way to run the agent for real stays reachable in long sessions.
+const { isAvailable: canOpenInN8nChat, openInChat } = useOpenInN8nChat();
+
 const allMenuItems = computed<Array<DropdownMenuItemProps<AgentPreviewMoreOption>>>(() => [
+	...(canOpenInN8nChat.value
+		? ([
+				{
+					id: OPEN_IN_N8N_CHAT,
+					label: i18n.baseText('agents.testCopy.openInChat'),
+					icon: { type: 'icon', value: 'message-square' },
+				},
+			] satisfies Array<DropdownMenuItemProps<AgentPreviewMoreOption>>)
+		: []),
 	{
 		id: COPY_LINK,
 		label: i18n.baseText('agents.builder.preview.more.copyLink' as BaseTextKey),
@@ -244,6 +258,9 @@ function dispatchMenuAction(itemId: AgentPreviewMoreOption) {
 			break;
 		case COPY_CONVERSATION:
 			void copyConversation();
+			break;
+		case OPEN_IN_N8N_CHAT:
+			void openInChat();
 			break;
 		case OPEN_IN_NEW_TAB: {
 			const route = router.resolve({

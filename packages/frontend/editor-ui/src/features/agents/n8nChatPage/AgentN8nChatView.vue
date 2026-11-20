@@ -23,7 +23,14 @@ import AgentPersonalisationIcon from '../components/AgentPersonalisationIcon.vue
 import N8nChatPageLayout from './components/N8nChatPageLayout.vue';
 import N8nChatThreadHistory from './components/N8nChatThreadHistory.vue';
 import { useAgentN8nChatThreadsStore } from './n8nChatThreads.store';
-import { consumePendingN8nChatMessage, type PendingN8nChatMessage } from './pendingN8nChatMessage';
+import {
+	consumePendingN8nChatMessage,
+	clearPendingN8nChatPrefill,
+	consumePendingN8nChatPrefill,
+	type PendingN8nChatMessage,
+	type PendingN8nChatPrefill,
+} from './pendingN8nChatMessage';
+import AgentTestCopyRealChatNote from '../testCopy/components/AgentTestCopyRealChatNote.vue';
 import ProjectIcon from '@/features/collaboration/projects/components/ProjectIcon.vue';
 import { firstMessageTitle } from '@/features/ai/instanceAi/instanceAi.threadRuntime';
 
@@ -87,11 +94,14 @@ const panel = useTemplateRef<InstanceType<typeof AgentChatPanel>>('panel');
 // Hand-off from the Assistant picker. Consumed per `agentId` because `RouterView`
 // reuses this view across agents.
 let pendingMessage: PendingN8nChatMessage | undefined;
+// Prototype (test copies): "Open in n8n Chat" from the test pane fills the composer, never sends.
+let pendingPrefill: PendingN8nChatPrefill | undefined;
 watch(
 	() => props.agentId,
 	async (id) => {
 		if (!id) return;
 		pendingMessage = consumePendingN8nChatMessage(id);
+		pendingPrefill = consumePendingN8nChatPrefill(id);
 		await loadAgent(id);
 	},
 	{ immediate: true },
@@ -110,6 +120,12 @@ watch(
 );
 
 watch(panel, (current) => {
+	if (current && pendingPrefill && !props.agentThreadId) {
+		const text = pendingPrefill.text;
+		pendingPrefill = undefined;
+		current.setDraft(text);
+		clearPendingN8nChatPrefill();
+	}
 	if (!current || !pendingMessage || props.agentThreadId) return;
 	current.sendMessageFromOutside(pendingMessage.text, pendingMessage.files);
 	pendingMessage = undefined;
@@ -230,57 +246,59 @@ const agentPageRoute = computed(() => {
 			:button-text="i18n.baseText('generic.retry')"
 			@click:button="retryLoad"
 		/>
-		<AgentChatPanel
-			v-else-if="agent"
-			ref="panel"
-			:project-id="projectId"
-			:agent-id="agentId"
-			mode="inline"
-			:continue-session-id="continueSessionId"
-			:new-session="isNewSession"
-			:agent-config="agentConfig"
-			:attachment-capabilities="agent.attachments"
-			agent-status="production"
-			:connected-triggers="[]"
-			channel="n8n-chat"
-			:background-jobs-active="true"
-			center-empty-state
-			@session-created="onSessionCreated"
-			@update:streaming="onStreamingChange"
-			@first-user-message="firstUserMessage = $event"
-			@agent-unavailable="notFound = true"
-		>
-			<template #empty-state>
-				<div :class="$style.emptyState" data-testid="agent-n8n-chat-empty-state">
-					<AgentPersonalisationIcon :personalisation="agent.personalisation" :size="64" />
-					<div :class="$style.nameRow">
-						<N8nText tag="h2" bold>{{ agent.name }}</N8nText>
-						<RouterLink
-							v-if="canOpenAgentPage && agentPageRoute"
-							:to="agentPageRoute"
-							:aria-label="i18n.baseText('agents.n8nChatPage.openAgentPage')"
-							:class="$style.openAgentPage"
-							data-testid="agent-n8n-chat-open-page"
+		<template v-else-if="agent">
+			<AgentTestCopyRealChatNote :available-in-chat="agent.availableInChat" />
+			<AgentChatPanel
+				ref="panel"
+				:project-id="projectId"
+				:agent-id="agentId"
+				mode="inline"
+				:continue-session-id="continueSessionId"
+				:new-session="isNewSession"
+				:agent-config="agentConfig"
+				:attachment-capabilities="agent.attachments"
+				agent-status="production"
+				:connected-triggers="[]"
+				channel="n8n-chat"
+				:background-jobs-active="true"
+				center-empty-state
+				@session-created="onSessionCreated"
+				@update:streaming="onStreamingChange"
+				@first-user-message="firstUserMessage = $event"
+				@agent-unavailable="notFound = true"
+			>
+				<template #empty-state>
+					<div :class="$style.emptyState" data-testid="agent-n8n-chat-empty-state">
+						<AgentPersonalisationIcon :personalisation="agent.personalisation" :size="64" />
+						<div :class="$style.nameRow">
+							<N8nText tag="h2" bold>{{ agent.name }}</N8nText>
+							<RouterLink
+								v-if="canOpenAgentPage && agentPageRoute"
+								:to="agentPageRoute"
+								:aria-label="i18n.baseText('agents.n8nChatPage.openAgentPage')"
+								:class="$style.openAgentPage"
+								data-testid="agent-n8n-chat-open-page"
+							>
+								<N8nIcon icon="external-link" size="small" />
+							</RouterLink>
+						</div>
+						<N8nText
+							v-if="agent.description"
+							color="text-light"
+							data-testid="agent-n8n-chat-description"
 						>
-							<N8nIcon icon="external-link" size="small" />
-						</RouterLink>
+							{{ agent.description }}
+						</N8nText>
 					</div>
-					<N8nText
-						v-if="agent.description"
-						color="text-light"
-						data-testid="agent-n8n-chat-description"
-					>
-						{{ agent.description }}
-					</N8nText>
-				</div>
-			</template>
-			<template #input-footer>
-				<div :class="$style.projectFooter" data-testid="agent-n8n-chat-project">
-					<ProjectIcon :icon="projectIcon" border-less size="mini" aria-hidden="true" />
-					{{ projectLabel }}
-				</div>
-			</template>
-		</AgentChatPanel>
+				</template>
+				<template #input-footer>
+					<div :class="$style.projectFooter" data-testid="agent-n8n-chat-project">
+						<ProjectIcon :icon="projectIcon" border-less size="mini" aria-hidden="true" />
+						{{ projectLabel }}
+					</div>
+				</template>
+			</AgentChatPanel>
+		</template>
 	</N8nChatPageLayout>
 </template>
 

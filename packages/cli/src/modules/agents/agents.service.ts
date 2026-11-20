@@ -795,6 +795,20 @@ export class AgentsService {
 	}
 
 	/**
+	 * Prototype (test copies): the builder's own agent in n8n Chat before it is
+	 * published there. Only when the prototype flag is on and the user can edit it.
+	 */
+	async findDraftChatAgentForBuilder(
+		agentId: string,
+		user: User,
+	): Promise<AgentN8nChatAgentDetails | null> {
+		if (process.env.N8N_ENV_FEAT_AGENT_TEST_COPIES !== 'true') return null;
+		const projectIds = await this.projectScopeService.getProjectIds(user, ['agent:update']);
+		const agent = await this.agentRepository.findForBuilderChatById(agentId, projectIds);
+		return agent ? { ...toChatListItem(agent), subAgents: [] } : null;
+	}
+
+	/**
 	 * The user's own n8n Chat threads across every agent they can currently
 	 * reach over n8n Chat: a project where they hold `agent:execute`, with a
 	 * published config that carries the channel. Scoping by agent id (not just

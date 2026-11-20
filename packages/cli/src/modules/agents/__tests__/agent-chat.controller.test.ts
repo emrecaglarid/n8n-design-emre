@@ -15,6 +15,7 @@ import type { CredentialsService } from '@/credentials/credentials.service';
 import { BadRequestError, NotFoundError } from '@n8n/errors';
 
 import type { AgentChatAttachmentService } from '../agent-chat-attachment.service';
+import type { TestCopyService } from '../test-copies/test-copy.service';
 import { AgentChatController } from '../agent-chat.controller';
 import type { AgentExecutionOrchestratorService } from '../agent-execution-orchestrator.service';
 import { mockLogger } from '@n8n/backend-test-utils';
@@ -125,6 +126,7 @@ function makeController() {
 		agentsConfig,
 		new AgentChatRelayService(messageQueue, previewStreams, agentChatAttachmentService),
 		plans,
+		mock<TestCopyService>(),
 	);
 
 	return {

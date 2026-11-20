@@ -1,4 +1,10 @@
-import { stashPendingN8nChatMessage, consumePendingN8nChatMessage } from '../pendingN8nChatMessage';
+import {
+	clearPendingN8nChatPrefill,
+	stashPendingN8nChatMessage,
+	consumePendingN8nChatMessage,
+	stashPendingN8nChatPrefill,
+	consumePendingN8nChatPrefill,
+} from '../pendingN8nChatMessage';
 
 describe('pendingN8nChatMessage', () => {
 	it('returns the stored message for a matching agent id', () => {
@@ -29,5 +35,24 @@ describe('pendingN8nChatMessage', () => {
 
 	it('returns undefined when nothing was ever stored', () => {
 		expect(consumePendingN8nChatMessage('agent-1')).toBeUndefined();
+	});
+});
+
+describe('pendingN8nChatPrefill', () => {
+	it('keeps the prefill until a composer shows it', () => {
+		stashPendingN8nChatPrefill({ agentId: 'agent-1', text: 'Where is order #1006?' });
+
+		// The route can create the view twice for one visit, so a read does not clear it.
+		expect(consumePendingN8nChatPrefill('agent-1')?.text).toBe('Where is order #1006?');
+		expect(consumePendingN8nChatPrefill('agent-1')?.text).toBe('Where is order #1006?');
+		clearPendingN8nChatPrefill();
+		expect(consumePendingN8nChatPrefill('agent-1')).toBeUndefined();
+	});
+
+	it('clears the prefill for a different agent id', () => {
+		stashPendingN8nChatPrefill({ agentId: 'agent-1', text: 'Hi' });
+
+		expect(consumePendingN8nChatPrefill('agent-2')).toBeUndefined();
+		expect(consumePendingN8nChatPrefill('agent-1')).toBeUndefined();
 	});
 });

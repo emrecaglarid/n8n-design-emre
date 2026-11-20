@@ -963,6 +963,7 @@ export class AgentExecutionOrchestratorService {
 			resourceId: memory.resourceId,
 			userId: user.id,
 			sessionMode,
+			user,
 		});
 		await this.externalHooks.run('agent.preExecute', [agentId]);
 		yield* this.withRuntimeLease(
@@ -1679,6 +1680,8 @@ export class AgentExecutionOrchestratorService {
 		skipPublishedCheck?: boolean;
 		/** Produces the error thrown for an inaccessible thread. Defaults to 'Session not found'. */
 		denied?: () => Error;
+		/** Prototype (test copies): the agent's builder may use an unpublished agent here, for real. */
+		user?: User;
 	}): Promise<ChatChannelSetup> {
 		const {
 			agentId,
@@ -1689,12 +1692,15 @@ export class AgentExecutionOrchestratorService {
 			sessionMode,
 			skipPublishedCheck,
 			denied,
+			user,
 		} = params;
-		if (
-			!skipPublishedCheck &&
-			!(await this.agentRepository.isN8nChatPublished(agentId, projectId))
-		) {
-			throw new AgentN8nChatUnavailableError();
+		const published =
+			skipPublishedCheck || (await this.agentRepository.isN8nChatPublished(agentId, projectId));
+		if (!published) {
+			const { canBuilderUseDraftInChat } = await import('./test-copies/test-copy-chat-access.js');
+			if (!(await canBuilderUseDraftInChat(user, projectId))) {
+				throw new AgentN8nChatUnavailableError();
+			}
 		}
 		const fail = denied ?? (() => new UserError('Session not found'));
 		if (resourceId !== chatSurfaceMemoryResourceId('n8n-chat', userId)) {
@@ -1718,7 +1724,7 @@ export class AgentExecutionOrchestratorService {
 			alwaysSandboxed: true,
 			source: N8N_CHAT_PRODUCTION_SOURCE,
 			runtime: {
-				usePublishedVersion: true,
+				usePublishedVersion: published,
 				integrationType: N8N_CHAT_INTEGRATION_TYPE,
 				attributionUserId: userId,
 			},

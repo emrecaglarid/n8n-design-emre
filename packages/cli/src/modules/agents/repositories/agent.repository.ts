@@ -405,6 +405,22 @@ export class AgentRepository extends BaseRepository<Agent> {
 	 * project, when `projectIds` is null) and its published config carries the
 	 * channel. Loads `project` too — the chat page labels the agent with it.
 	 */
+	/** Prototype (test copies): an agent in one of these projects, published or not, for its builder in n8n Chat. */
+	async findForBuilderChatById(
+		id: string,
+		projectIds: string[] | null,
+	): Promise<ProjectAgent | null> {
+		if (projectIds?.length === 0) return null;
+		const query = this.createQueryBuilder('agent')
+			.leftJoinAndSelect('agent.activeVersion', 'activeVersion')
+			.leftJoinAndSelect('agent.project', 'project')
+			.where('agent.id = :id', { id })
+			.andWhere('agent.isArchived = :isArchived', { isArchived: false });
+		// null means every project (an instance-wide scope).
+		if (projectIds) query.andWhere('agent.projectId IN (:...projectIds)', { projectIds });
+		return projectAgentOrNull(await query.getOne());
+	}
+
 	async findChatReachableById(
 		id: string,
 		projectIds: string[] | null,

@@ -38,3 +38,33 @@ export function discardPendingN8nChatMessage(message: PendingN8nChatMessage): bo
 	pending = undefined;
 	return true;
 }
+
+/**
+ * Prefill for the composer of a new n8n Chat conversation, from the test pane's
+ * "Open in n8n Chat". Unlike the message above, it is never sent: the builder
+ * reviews it and sends it themselves.
+ */
+export interface PendingN8nChatPrefill {
+	agentId: string;
+	text: string;
+}
+
+let pendingPrefill: PendingN8nChatPrefill | undefined;
+
+export function stashPendingN8nChatPrefill(prefill: PendingN8nChatPrefill): void {
+	pendingPrefill = prefill;
+}
+
+/**
+ * Reads the prefill without clearing it: the route can create the view more
+ * than once for one visit, so it is cleared only once a composer shows it
+ * ({@link clearPendingN8nChatPrefill}). A prefill for another agent is dropped.
+ */
+export function consumePendingN8nChatPrefill(agentId: string): PendingN8nChatPrefill | undefined {
+	if (pendingPrefill && pendingPrefill.agentId !== agentId) pendingPrefill = undefined;
+	return pendingPrefill;
+}
+
+export function clearPendingN8nChatPrefill(): void {
+	pendingPrefill = undefined;
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, ref, useTemplateRef, watch } from 'vue';
+import { computed, inject, nextTick, provide, ref, useTemplateRef, watch } from 'vue';
 
 import { deriveAgentStatus } from '../composables/agentTelemetry.utils';
 import type {
@@ -12,6 +12,12 @@ import type {
 import type { BudgetAmountField } from '../utils/budget-config';
 import AgentChatPanel from './AgentChatPanel.vue';
 import { AGENT_BUILDER_STANDALONE_KEY } from './agentBuilderInjectionKeys';
+import AgentTestCopyComposerTop from '../testCopy/components/AgentTestCopyComposerTop.vue';
+import AgentTestCopyStarterChips from '../testCopy/components/AgentTestCopyStarterChips.vue';
+import { useOptionalAgentTestCopyStore } from '../testCopy/testCopy.store';
+import { afterResize } from '../testCopy/testCopyChipFlight';
+import { AGENT_TEST_COPY_CHAT_KEY, AGENT_TEST_COPY_SEND_KEY } from '../testCopy/testCopy.injection';
+import { useTestCopyChatPage } from '../testCopy/useTestCopyChatPage';
 
 const standaloneBuilder = inject(AGENT_BUILDER_STANDALONE_KEY, false);
 
@@ -57,8 +63,47 @@ const emit = defineEmits<{
 	'message-sent': [];
 }>();
 
+const {
+	placeholder: chatPlaceholder,
+	clientContext: testCopyClientContext,
+	onStreamEvent: onTestCopyStreamEvent,
+	onMessageSending: onTestCopyMessageSending,
+	selectChannel: selectTestChannel,
+} = useTestCopyChatPage({
+	projectId: () => props.projectId,
+	agentId: () => props.agentId,
+	sessionId: () => props.effectiveSessionId,
+	placeholder: () => props.placeholder,
+	agentName: () => props.localConfig?.name ?? props.agent?.name,
+});
+provide(AGENT_TEST_COPY_CHAT_KEY, true);
+
 const inputDraft = ref('');
 const chatPanel = useTemplateRef<InstanceType<typeof AgentChatPanel>>('chatPanel');
+
+const testCopy = useOptionalAgentTestCopyStore();
+const testCopyActive = computed(() => testCopy?.isActive ?? false);
+const draftEmpty = computed(() => inputDraft.value.trim() === '');
+/** The top of the input holds the Slack chip. */
+const showComposerTop = computed(() => testCopyActive.value && Boolean(testCopy?.sendChannel));
+/** Before the first message: example chips and the Slack chip above the input. */
+const showTestLanding = computed(() => testCopyActive.value && !testCopy?.isPlaceLocked);
+
+/** An example fills the input; the builder can edit it before sending. */
+async function pickExample(text: string) {
+	inputDraft.value = text;
+	await nextTick();
+	chatPanel.value?.focusInput();
+}
+
+// A suggested prompt picks its channel first: the chat reads the channel when it sends.
+// The draft is this page's model, so it must hold the text before the panel submits it.
+provide(AGENT_TEST_COPY_SEND_KEY, async (text, channelLabel) => {
+	selectTestChannel(channelLabel);
+	inputDraft.value = text;
+	await nextTick();
+	chatPanel.value?.sendMessageFromOutside(text);
+});
 
 function onFirstUserMessage(text: string | undefined) {
 	if (text !== undefined) emit('message-sent');
@@ -102,7 +147,8 @@ defineExpose({ focusInput, getConversationMarkdown, clearBudgetStops });
 				v-model:input-draft="inputDraft"
 				:project-id="projectId"
 				:agent-id="agentId"
-				:placeholder="placeholder"
+				:placeholder="chatPlaceholder"
+				:client-context="testCopyClientContext"
 				:composer-height="composerHeight"
 				:attach-button-icon="standaloneBuilder ? 'plus' : 'paperclip'"
 				:visible="visible"
@@ -125,9 +171,21 @@ defineExpose({ focusInput, getConversationMarkdown, clearBudgetStops });
 				@open-build="emit('open-build')"
 				@send-to-assistant="emit('send-to-assistant', $event)"
 				@first-user-message="onFirstUserMessage"
+				@stream-event="onTestCopyStreamEvent"
+				@message-sending="onTestCopyMessageSending"
 			>
 				<template v-if="$slots['composer-start']" #composer-start>
 					<slot name="composer-start" />
+				</template>
+				<template v-if="showTestLanding" #above-input>
+					<AgentTestCopyStarterChips
+						:draft-empty="draftEmpty"
+						@pick="pickExample"
+						@selected="afterResize(() => focusInput())"
+					/>
+				</template>
+				<template v-if="showComposerTop" #composer-attachments>
+					<AgentTestCopyComposerTop @reset="focusInput()" />
 				</template>
 				<template v-if="$slots['composer-footer']" #composer-footer>
 					<slot name="composer-footer" />

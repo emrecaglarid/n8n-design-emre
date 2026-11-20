@@ -1,3 +1,4 @@
+import { parseTestChannelMessage } from '@n8n/api-types';
 import { useI18n } from '@n8n/i18n';
 
 interface ThreadLike {
@@ -10,7 +11,9 @@ interface ThreadLike {
 const PREVIEW_MAX_CHARS = 60;
 
 function previewFromFirstMessage(text: string): string {
-	const trimmed = text.replace(/\s+/g, ' ').trim();
+	// A test message sent from a channel starts with a context line for the agent.
+	const body = parseTestChannelMessage(text)?.text ?? text;
+	const trimmed = body.replace(/\s+/g, ' ').trim();
 	if (!trimmed) return '';
 	if (trimmed.length <= PREVIEW_MAX_CHARS) return trimmed;
 	return `${trimmed.slice(0, PREVIEW_MAX_CHARS - 1).trimEnd()}…`;

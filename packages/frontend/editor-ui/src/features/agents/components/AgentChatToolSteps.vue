@@ -16,6 +16,7 @@ import { useI18n } from '@n8n/i18n';
 import { computed, toRef } from 'vue';
 import type { ToolCall } from '@/features/ai/shared/agentsChat/types';
 import AiReasoningBlock from '@/features/ai/shared/components/AiReasoningBlock.vue';
+import { useOptionalAgentTestCopyStore } from '../testCopy/testCopy.store';
 import type { AgentFixWithAssistantFailure } from '../types';
 import { useSubAgentNames } from '../composables/useSubAgentNames';
 import { isCompactToolName, resolveToolNameForDisplay } from '../utils/toolDisplayName';
@@ -134,7 +135,47 @@ function getToolDisplayName(toolName: string, output?: unknown): string {
 	return resolveToolNameForDisplay(toolName, i18n, output);
 }
 
+// Prototype (test copies): a write that stayed in the test copy says what it would do live.
+const testCopyStore = useOptionalAgentTestCopyStore();
+
+function testCopyStepLabel(tc: ToolCall): string | undefined {
+	const change = testCopyStore?.changes.find((c) => c.toolCallId === tc.toolCallId);
+	if (!change) return undefined;
+	const app = change.app;
+	// After "Run these actions", the step says what happened in the real app.
+	const done = Boolean(change.appliedAt);
+	switch (change.kind) {
+		case 'email':
+			return i18n.baseText(
+				done ? 'agents.testCopy.stepLabel.done.email' : 'agents.testCopy.stepLabel.email',
+				{ interpolate: { app } },
+			);
+		case 'message':
+			return i18n.baseText(
+				done ? 'agents.testCopy.stepLabel.done.message' : 'agents.testCopy.stepLabel.message',
+				{ interpolate: { app } },
+			);
+		case 'row':
+			return i18n.baseText(
+				done ? 'agents.testCopy.stepLabel.done.row' : 'agents.testCopy.stepLabel.row',
+				{ interpolate: { app } },
+			);
+		case 'record':
+			return i18n.baseText(
+				done ? 'agents.testCopy.stepLabel.done.record' : 'agents.testCopy.stepLabel.record',
+				{ interpolate: { app, object: (change.record?.object ?? '').toLowerCase() } },
+			);
+		default:
+			return i18n.baseText(
+				done ? 'agents.testCopy.stepLabel.done.other' : 'agents.testCopy.stepLabel.other',
+				{ interpolate: { app } },
+			);
+	}
+}
+
 function toolStepLabel(tc: ToolCall, isCompact = false): string {
+	const heldLabel = testCopyStepLabel(tc);
+	if (heldLabel) return heldLabel;
 	if (isDelegateSubAgentTool(tc.tool)) {
 		return i18n.baseText('agents.chat.delegate.labelFallback');
 	}

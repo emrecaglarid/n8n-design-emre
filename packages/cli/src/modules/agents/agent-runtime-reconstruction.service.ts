@@ -1004,12 +1004,14 @@ export class AgentRuntimeReconstructionService {
 		const instrumentToolAdditionalData = instrumentation?.configureToolAdditionalData;
 		return async (ref) => {
 			if (ref.type === 'workflow') {
-				return await this.resolveWorkflowTool(
+				const tool = await this.resolveWorkflowTool(
 					ref,
 					runIdentity,
 					instrumentToolAdditionalData,
 					unavailable,
 				);
+				const { skipInTestChats } = await import('./test-copies/test-copy-tool-guard.js');
+				return tool ? skipInTestChats(tool) : tool;
 			}
 			if (ref.type === 'node') {
 				const { resolveNodeTool } = await import('./tools/node-tool-factory.js');
